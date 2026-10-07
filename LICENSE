@@ -1,0 +1,31 @@
+Copyright (c) 2026 Nightious. All rights reserved.
+
+This source code is published for public viewing and for collaboration on this
+repository only. It is NOT open source, and no open-source license is granted.
+
+You MAY:
+  - View and read the source code.
+  - Contribute changes back to THIS repository (via issues and pull requests).
+    By submitting a contribution you grant the copyright holder a perpetual,
+    worldwide, irrevocable, royalty-free license to use, modify, and
+    incorporate your contribution into this project.
+
+You MAY NOT, without prior written permission from the copyright holder:
+  - Copy, reproduce, or redistribute this code, in whole or in part, outside
+    this repository.
+  - Publish, distribute, host, or otherwise make available your own modified
+    version or any derivative work (a fork is permitted ONLY as the mechanism
+    for opening a pull request back to this repository).
+  - Use this code, in whole or in part, in any other project, product, or
+    service, whether commercial or non-commercial.
+
+Zendesk documentation, articles, and other content this software retrieves are
+NOT covered by this license; they belong to Zendesk, Inc. and are subject to
+Zendesk's own terms. This project is not affiliated with or endorsed by Zendesk.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

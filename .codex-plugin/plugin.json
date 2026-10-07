@@ -1,0 +1,26 @@
+{
+  "name": "zendesk-knowledge-mcp",
+  "version": "1.0.0",
+  "description": "Answer Zendesk questions from live official Zendesk docs, API reference, changelogs, and status. Read-only.",
+  "author": { "name": "nightious", "url": "https://github.com/nightious" },
+  "homepage": "https://github.com/nightious/zendesk-knowledge-mcp",
+  "repository": "https://github.com/nightious/zendesk-knowledge-mcp",
+  "license": "SEE LICENSE IN LICENSE",
+  "keywords": ["mcp", "mcp-server", "zendesk", "help-center", "documentation", "api-reference", "changelog"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Zendesk Knowledge",
+    "shortDescription": "Live, cited answers from official Zendesk docs",
+    "longDescription": "Searches support.zendesk.com, developer.zendesk.com, and status.zendesk.com live, with citations, plan requirements, and feature lifecycle (beta, deprecated, retired). Read-only: it never touches a Zendesk account.",
+    "developerName": "nightious",
+    "category": "Productivity",
+    "capabilities": ["Read"],
+    "websiteURL": "https://github.com/nightious/zendesk-knowledge-mcp",
+    "defaultPrompt": [
+      "Which Zendesk plans include skills-based routing?",
+      "What Zendesk API changes were announced since last month?",
+      "Is Zendesk offset pagination deprecated?"
+    ]
+  }
+}

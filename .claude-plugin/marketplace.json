@@ -1,0 +1,19 @@
+{
+  "name": "zendesk-knowledge-mcp",
+  "description": "Read-only Zendesk knowledge MCP server and skill: Help Center, developer docs, changelogs, and status, live from official Zendesk sources.",
+  "owner": { "name": "nightious" },
+  "plugins": [
+    {
+      "name": "zendesk-knowledge-mcp",
+      "source": "./",
+      "description": "MCP server with 7 read-only tools over support.zendesk.com, developer.zendesk.com, and status.zendesk.com, plus a skill that teaches agents how to search them.",
+      "version": "1.0.0",
+      "author": { "name": "nightious" },
+      "homepage": "https://github.com/nightious/zendesk-knowledge-mcp",
+      "repository": "https://github.com/nightious/zendesk-knowledge-mcp",
+      "license": "SEE LICENSE IN LICENSE",
+      "keywords": ["mcp", "mcp-server", "zendesk", "help-center", "documentation", "api-reference", "changelog"],
+      "category": "productivity"
+    }
+  ]
+}

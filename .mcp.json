@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "zendesk-knowledge": {
+      "command": "node",
+      "args": ["dist/index.mjs"],
+      "cwd": "."
+    }
+  }
+}

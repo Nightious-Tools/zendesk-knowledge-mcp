@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+      # dist/index.mjs is committed and is what every install channel executes.
+      # A rebuild must produce no diff, or the shipped bundle is stale.
+      - run: npm run build
+      - name: dist/ is in sync with src/
+        run: |
+          if ! git diff --exit-code -- dist/; then
+            echo "::error file=dist/index.mjs::dist/ is stale. Run 'npm run build' and commit dist/"
+            exit 1
+          fi
+
+      - name: versions agree
+        run: |
+          V=$(node -p "require('./package.json').version")
+          echo "package.json version: $V"
+          fail=0
+          check() {
+            if ! grep -qF "$2" "$1"; then
+              echo "::error file=$1::expected $2 (package.json says $V)"
+              fail=1
+            fi
+          }
+          check src/server.ts                       "SERVER_VERSION = \"$V\""
+          check .claude-plugin/plugin.json          "\"version\": \"$V\""
+          check .claude-plugin/marketplace.json     "\"version\": \"$V\""
+          check .codex-plugin/plugin.json           "\"version\": \"$V\""
+          exit $fail
