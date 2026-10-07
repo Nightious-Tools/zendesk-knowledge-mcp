@@ -1,0 +1,16 @@
+{
+  "name": "zendesk-knowledge-mcp",
+  "description": "Answer Zendesk questions from live official Zendesk docs, API reference, changelogs, and status. Read-only.",
+  "version": "1.0.0",
+  "author": { "name": "nightious" },
+  "homepage": "https://github.com/nightious/zendesk-knowledge-mcp",
+  "repository": "https://github.com/nightious/zendesk-knowledge-mcp",
+  "license": "SEE LICENSE IN LICENSE",
+  "keywords": ["mcp", "mcp-server", "zendesk", "help-center", "documentation", "api-reference", "changelog"],
+  "mcpServers": {
+    "zendesk-knowledge": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/index.mjs"]
+    }
+  }
+}
