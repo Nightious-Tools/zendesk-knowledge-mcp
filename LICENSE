@@ -1,27 +1,45 @@
 Copyright (c) 2026 Nightious. All rights reserved.
 
-This source code is published for public viewing and for collaboration on this
-repository only. It is NOT open source, and no open-source license is granted.
+This software is source-available. It is NOT open source, and no open-source
+license is granted. "This repository" means
+https://github.com/nightious/zendesk-knowledge-mcp.
 
 You MAY:
   - View and read the source code.
-  - Contribute changes back to THIS repository (via issues and pull requests).
-    By submitting a contribution you grant the copyright holder a perpetual,
-    worldwide, irrevocable, royalty-free license to use, modify, and
-    incorporate your contribution into this project.
+  - Install and run unmodified copies of this software, using the install
+    methods described in this repository, for personal use or for internal
+    use within your business or organization. Commercial internal use, such
+    as by your own help desk team, is allowed.
+  - Contribute changes back to this repository through issues and pull
+    requests. By submitting a contribution you confirm you have the right to
+    submit it, and you grant the copyright holder a perpetual, worldwide,
+    irrevocable, royalty-free license to use, copy, modify, distribute, and
+    sublicense your contribution as part of this project.
 
 You MAY NOT, without prior written permission from the copyright holder:
-  - Copy, reproduce, or redistribute this code, in whole or in part, outside
-    this repository.
-  - Publish, distribute, host, or otherwise make available your own modified
-    version or any derivative work (a fork is permitted ONLY as the mechanism
-    for opening a pull request back to this repository).
-  - Use this code, in whole or in part, in any other project, product, or
-    service, whether commercial or non-commercial.
+  - Copy, reproduce, or redistribute this code, in whole or in part, except
+    for copies made solely to install and run it as allowed above.
+  - Modify this code, except to prepare and test a pull request to this
+    repository.
+  - Publish, distribute, host, or otherwise make available a modified version
+    or any derivative work. A fork is permitted ONLY as the mechanism for
+    opening a pull request back to this repository.
+  - Incorporate this code, in whole or in part, into any other project,
+    product, or service, whether commercial or non-commercial.
+  - Offer this software, or access to it, as a service to anyone outside your
+    own business or organization.
+
+If you break any of these terms, your permission under this license ends.
+
+The copyright holder may change this license at any time. The current version
+is the LICENSE file on the default branch of this repository. It replaces
+earlier versions for all copies of this software, including copies of earlier
+releases, from the date it is published there.
 
 Zendesk documentation, articles, and other content this software retrieves are
-NOT covered by this license; they belong to Zendesk, Inc. and are subject to
-Zendesk's own terms. This project is not affiliated with or endorsed by Zendesk.
+NOT covered by this license; they belong to Zendesk, Inc. or their respective
+owners and are subject to Zendesk's own terms. Zendesk is a trademark of
+Zendesk, Inc. This project is not affiliated with or endorsed by Zendesk.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,

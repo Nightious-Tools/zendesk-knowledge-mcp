@@ -1,49 +1,53 @@
 # zendesk-knowledge-mcp
 
-Read-only MCP stdio server over support.zendesk.com, developer.zendesk.com, and status.zendesk.com.
-`src/server.ts` registers tools; `src/util/http.ts` is the domain allow-list (the security boundary:
-keep it strict). README "How answers stay grounded" explains the design.
+Read-only MCP stdio server over support/developer/status.zendesk.com. `src/server.ts` registers the 7 tools.
+
+## Rules
+
+- `src/util/http.ts`: https allow-listed hosts only, rechecked per redirect. Keep strict.
+- Help Center: articles endpoints only, no community.
+- Authority: canonical > changelog > announcement. A newer deprecation notice beats an older canonical page; in `get_feature_lifecycle` a high-confidence whole-page deprecation wins.
+- Lifecycle scope `partial` (body-only hit) and `compilation` (release-note digest) are not page-wide statuses.
+- Cache is in-memory only; nothing on disk.
+- Logs to stderr only; stdout is the MCP transport.
+- No write tools. `test/server.test.ts` asserts `readOnlyHint`.
 
 ## dist/ is what runs
 
-`dist/index.mjs` is an esbuild bundle of `src/`, committed, and every install channel executes it
-directly; nothing builds on the user's machine and no `npm install` runs. Runtime deps are therefore
-devDependencies. After any `src/` edit, run `npm run build` and commit `dist/` in the same commit; CI
-fails on a stale bundle. The `createRequire` banner in the build script is required (cheerio pulls CJS
-deps that call `require`).
+Installs run the committed `dist/index.mjs`, no `npm install`, so runtime deps are devDependencies. After any `src/` edit, `npm run build` and commit `dist/` with it; CI fails on a stale bundle. Keep the build script's `createRequire` banner (cheerio's CJS deps call `require`).
 
-## One repo, two plugin hosts
+## Plugin hosts
 
-| File | Read by |
-|---|---|
-| `.claude-plugin/marketplace.json`, `.claude-plugin/plugin.json` | Claude Code |
-| `.agents/plugins/marketplace.json`, `.codex-plugin/plugin.json`, `.mcp.json` | Codex |
-| `skills/zendesk-knowledge/SKILL.md` | both |
+Claude Code: `.claude-plugin/`. Codex: `.agents/plugins/marketplace.json`, `.codex-plugin/plugin.json`, `.mcp.json`. Both: `skills/zendesk-knowledge/SKILL.md`.
 
-Codex does not expand `${CLAUDE_PLUGIN_ROOT}`, so `.mcp.json` uses a relative path plus `"cwd": "."`.
-Claude Code also loads `.mcp.json`; the inline server in `.claude-plugin/plugin.json` has the **same
-name** (`zendesk-knowledge`) so it overrides that entry. Keep the names identical.
+Codex doesn't expand `${CLAUDE_PLUGIN_ROOT}`, so `.mcp.json` uses a relative path + `"cwd": "."`. Claude Code also loads `.mcp.json`; the inline server in `.claude-plugin/plugin.json` has the same name (`zendesk-knowledge`) so it overrides it.
 
 ## Lockstep
 
-| When you change | Also update |
+| Change | Also update |
 |---|---|
-| version | `package.json`, `src/server.ts` (`SERVER_VERSION`), `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `.codex-plugin/plugin.json`. CI fails if they disagree. Then rebuild and tag a release. |
-| a tool or param | `src/server.ts`, `README.md`, `skills/zendesk-knowledge/SKILL.md` |
-| plugin/server name | all five manifest files above plus `.mcp.json` and README install commands |
+| version | `package.json`, `SERVER_VERSION` in `src/server.ts`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `.codex-plugin/plugin.json` (CI checks) |
+| a tool or param | `src/server.ts`, `README.md`, `SKILL.md` |
+| plugin name `zendesk-knowledge-mcp` | `package.json`, both `marketplace.json`, both `plugin.json`, README |
+| server name `zendesk-knowledge` | `SERVER_NAME`, `.mcp.json`, `.claude-plugin/plugin.json`, README |
 
 ## Releasing
 
+Bump version first.
+
 ```
 npm run typecheck && npm test && npm run build
-git push
-gh release create v<X.Y.Z> --title "v<X.Y.Z>" --notes "..."
+git commit -am vX.Y.Z && git push
+gh release create vX.Y.Z --title vX.Y.Z --notes "..."
 ```
 
-Publish as GitHub user `nightious` (`gh auth switch -u nightious`); this repo's git `user.name` matches.
+As GitHub user `nightious` (`gh auth switch -u nightious`).
 
 ## Verification
 
-`npm test` is offline (fetch stub). For the bundle, copy `dist/index.mjs` alone into an empty directory
-and pipe `initialize` + `tools/list` JSON-RPC into `node index.mjs`: it must list 7 tools. For live
-behaviour use `npm run inspect` with the queries in the README.
+`npm test` is offline. Bundle: copy `dist/index.mjs` alone to an empty dir, pipe `initialize` + `tools/list` into `node index.mjs`; expect 7 tools. Live, via `npm run inspect`:
+
+- `search_help_center {"query":"trigger conditions","product":"Support"}`
+- `get_zendesk_changes {"since":"2026-07-01"}`
+- `get_feature_lifecycle {"feature":"offset pagination"}`
+- `get_zendesk_status {"subdomain":"yourcompany"}`
