@@ -31,7 +31,7 @@ export const OFFICIAL_HOSTS = {
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const lvl = (env.ZD_LOG_LEVEL ?? "info") as LogLevel;
   return {
-    userAgent: env.ZD_USER_AGENT ?? "zendesk-knowledge-mcp/1.0 (+https://github.com/nightious/zendesk-knowledge-mcp)",
+    userAgent: env.ZD_USER_AGENT ?? "zendesk-knowledge-mcp/1.0 (+https://github.com/Nightious-Tools/zendesk-knowledge-mcp)",
     defaultLocale: (env.ZD_DEFAULT_LOCALE ?? "en-us").toLowerCase(),
     timeoutMs: int("ZD_HTTP_TIMEOUT_MS", 15000),
     maxRetries: int("ZD_HTTP_MAX_RETRIES", 2),

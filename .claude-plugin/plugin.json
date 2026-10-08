@@ -3,8 +3,8 @@
   "description": "Answer Zendesk questions from live official Zendesk docs, API reference, changelogs, and status. Read-only.",
   "version": "1.0.2",
   "author": { "name": "nightious" },
-  "homepage": "https://github.com/nightious/zendesk-knowledge-mcp",
-  "repository": "https://github.com/nightious/zendesk-knowledge-mcp",
+  "homepage": "https://github.com/Nightious-Tools/zendesk-knowledge-mcp",
+  "repository": "https://github.com/Nightious-Tools/zendesk-knowledge-mcp",
   "license": "SEE LICENSE IN LICENSE",
   "keywords": ["mcp", "mcp-server", "zendesk", "help-center", "documentation", "api-reference", "changelog"],
   "mcpServers": {
