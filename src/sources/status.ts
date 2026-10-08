@@ -62,8 +62,8 @@ export class StatusSource {
     const notes = [
       ...extraNotes,
       "Zendesk's Status API returns only currently active incidents and upcoming maintenance; resolved or historical incidents are not available via API (see status.zendesk.com for history).",
-      sub && qs ? `Filtered to incidents Zendesk associates with subdomain "${sub}". Absence of incidents does not guarantee the account is unaffected by a very new event.` : "No subdomain given: showing all active incidents across Zendesk infrastructure.",
-    ];
+      sub ? (qs ? `Filtered to incidents Zendesk associates with subdomain "${sub}". Absence of incidents does not guarantee the account is unaffected by a very new event.` : "") : "No subdomain given: showing all active incidents across Zendesk infrastructure.",
+    ].filter(Boolean);
     return {
       active: activeViews,
       maintenance: maintViews,

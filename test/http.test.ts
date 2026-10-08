@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { HttpClient, isOfficialUrl } from "../src/util/http.js";
 import { DomainNotAllowedError, HttpError, TimeoutError } from "../src/util/errors.js";
 import { Logger } from "../src/util/log.js";
@@ -65,6 +65,23 @@ describe("resilience", () => {
     const http = new HttpClient(cfg, new Logger("silent"), slow, noSleep);
     await expect(http.get("https://support.zendesk.com/slow")).rejects.toBeInstanceOf(TimeoutError);
   });
+  it("times out when the body stalls after headers", async () => {
+    const cfg = testConfig({ timeoutMs: 20, maxRetries: 0 });
+    const stall: any = async (_u: string, init?: RequestInit) => new Response(new ReadableStream({ start(c) { init?.signal?.addEventListener("abort", () => c.error(Object.assign(new Error("x"), { name: "AbortError" }))); } }));
+    const http = new HttpClient(cfg, new Logger("silent"), stall, noSleep);
+    await expect(http.get("https://support.zendesk.com/stall")).rejects.toBeInstanceOf(TimeoutError);
+  });
+  it("caps Retry-After at 10 s and stops at the 30 s budget", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const sleeps: number[] = [];
+      const sleep = async (ms: number) => { sleeps.push(ms); vi.setSystemTime(Date.now() + ms); };
+      const f = mockFetch({ "https://support.zendesk.com/r": { status: 429, headers: { "retry-after": "3600" } } });
+      const http = new HttpClient(testConfig({ maxRetries: 10 }), new Logger("silent"), f, sleep);
+      await http.get("https://support.zendesk.com/r").catch(() => {});
+      expect(sleeps).toEqual([10_000, 10_000, 10_000]);
+    } finally { vi.useRealTimers(); }
+  });
 });
 
 describe("cache", () => {
@@ -75,8 +92,11 @@ describe("cache", () => {
     expect(a.cached).toBe(false);
     expect(b.cached).toBe(true);
     expect(f.calls).toHaveLength(1);
-    http.clearCache();
-    await http.get("https://support.zendesk.com/d", { ttlMs: 60_000 });
+  });
+  it("does not cache a non-JSON 200 body", async () => {
+    const { f, http } = mk({ "https://support.zendesk.com/j": { body: "<html>challenge</html>" } });
+    await expect(http.getJson("https://support.zendesk.com/j", 60_000)).rejects.toMatchObject({ code: "BAD_RESPONSE" });
+    await http.getJson("https://support.zendesk.com/j", 60_000).catch(() => {});
     expect(f.calls).toHaveLength(2);
   });
   it("ttl 0 bypasses the cache", async () => {

@@ -4,7 +4,7 @@ import { loadConfig, type Config } from "./config.js";
 import { HttpClient, type FetchLike } from "./util/http.js";
 import { Logger } from "./util/log.js";
 import { ZdError } from "./util/errors.js";
-import { detectConflicts, scoreText } from "./util/classify.js";
+import { AUTHORITY_RANK, detectConflicts, scoreText } from "./util/classify.js";
 import { HelpCenterSource } from "./sources/helpCenter.js";
 import { DeveloperDocsSource } from "./sources/developerDocs.js";
 import { ChangesSource } from "./sources/changes.js";
@@ -12,8 +12,10 @@ import { StatusSource } from "./sources/status.js";
 import type { DocResult, Source, ToolEnvelope, ToolFailure } from "./types.js";
 
 export const SERVER_NAME = "zendesk-knowledge";
-export const SERVER_VERSION = "1.0.0";
+export const SERVER_VERSION = "1.0.1";
 
+const LOCALE = z.string().regex(/^[a-z]{2}(-[a-z0-9]+)?$/i).optional();
+const HEADING = z.string().min(1).max(200).optional().describe("Return only the first section whose heading contains this text (case-insensitive), up to the next same-or-higher heading");
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } as const;
 
 export interface Deps { cfg?: Config; fetchImpl?: FetchLike; logger?: Logger }
@@ -76,7 +78,7 @@ export function createServer(deps: Deps = {}): { server: McpServer; http: HttpCl
         "Returns title, snippet, canonical URL, updated date, product, plan requirements and lifecycle status for each hit. Paginated.",
       inputSchema: {
         query: z.string().min(1).max(300).describe("Keywords, e.g. 'trigger conditions' or 'SLA policies'"),
-        locale: z.string().regex(/^[a-z]{2}(-[a-z0-9]+)?$/i).optional().describe("Help Center locale, default en-us"),
+        locale: LOCALE.describe("Help Center locale, default en-us"),
         product: z.string().max(60).optional().describe("Soft filter/boost, e.g. Support, Guide, Messaging, Talk, Explore, Sell, AI agents, Admin Center"),
         page: z.number().int().min(1).max(100).optional().describe("Result page (default 1)"),
         per_page: z.number().int().min(1).max(30).optional().describe("Results per page (default 10, max 30)"),
@@ -93,16 +95,17 @@ export function createServer(deps: Deps = {}): { server: McpServer; http: HttpCl
     "get_help_article",
     {
       title: "Get Zendesk Help Center article",
-      description: "Fetch one official Help Center article by numeric id or support.zendesk.com URL. Returns cleaned full text (truncated if very long), plan banners, breadcrumbs, dates and lifecycle classification.",
+      description: "Fetch one official Help Center article by numeric id or support.zendesk.com URL. Returns cleaned full text (truncated if very long), headings, plan banners, breadcrumbs, dates and lifecycle classification. Pass 'heading' to get one section only.",
       inputSchema: {
         article_id_or_url: z.string().min(1).describe("e.g. 4408893545882 or https://support.zendesk.com/hc/en-us/articles/4408893545882-..."),
-        locale: z.string().regex(/^[a-z]{2}(-[a-z0-9]+)?$/i).optional().describe("Override locale (defaults to the URL's locale or en-us)"),
+        locale: LOCALE.describe("Override locale (defaults to the URL's locale or en-us)"),
+        heading: HEADING,
       },
       annotations: READ_ONLY,
     },
     async (a) => guard("get_help_article", async () => {
-      const doc = await hc.getArticle(a.article_id_or_url, a.locale);
-      const notes: string[] = [];
+      const doc = await hc.getArticle(a.article_id_or_url, a.locale, a.heading);
+      const notes = headingNote(doc);
       if (doc.lifecycle.future_change_mentioned) notes.push(`Article references a future-dated change: "${doc.lifecycle.future_change_mentioned}". Distinguish current vs upcoming behaviour when answering.`);
       if (doc.content_truncated) notes.push("Content truncated to ZD_MAX_CONTENT_CHARS; see canonical URL for full text.");
       return ok("get_help_article", doc, [doc.source], notes);
@@ -134,13 +137,13 @@ export function createServer(deps: Deps = {}): { server: McpServer; http: HttpCl
     "get_developer_page",
     {
       title: "Get Zendesk developer docs page",
-      description: "Fetch and clean one developer.zendesk.com page (API reference, guide, changelog). Returns markdown-ish text, headings, badges (e.g. Deprecated) and lifecycle classification.",
-      inputSchema: { url: z.string().url().describe("Must be on developer.zendesk.com") },
+      description: "Fetch and clean one developer.zendesk.com page (API reference, guide, changelog). Returns markdown-ish text, headings, badges (e.g. Deprecated) and lifecycle classification. Pass 'heading' (or a URL #anchor) to get one section only.",
+      inputSchema: { url: z.string().url().describe("Must be on developer.zendesk.com; a #anchor selects that section"), heading: HEADING },
       annotations: READ_ONLY,
     },
     async (a) => guard("get_developer_page", async () => {
-      const doc = await dev.getPage(a.url);
-      const notes: string[] = [];
+      const doc = await dev.getPage(a.url, { heading: a.heading });
+      const notes = headingNote(doc);
       if (doc.lifecycle.status !== "current") notes.push(`Page classified as ${doc.lifecycle.status} (${doc.lifecycle.confidence}, scope=${doc.lifecycle.scope}); evidence: ${doc.lifecycle.evidence.slice(0, 3).join("; ")}`);
       if (doc.lifecycle.scope === "partial") notes.push("Lifecycle keywords were found in the body only: likely one endpoint/field/parameter on this page is affected while the rest is current. Quote the specific note when answering.");
       return ok("get_developer_page", doc, [doc.source], notes);
@@ -157,7 +160,7 @@ export function createServer(deps: Deps = {}): { server: McpServer; http: HttpCl
       inputSchema: {
         query: z.string().max(200).optional().describe("Keywords to filter, e.g. 'offset pagination' or 'OAuth tokens'. Omit for the newest changes."),
         since: z.string().optional().describe("Only changes announced on/after this date (ISO yyyy-mm-dd or 'Aug 1, 2026')"),
-        locale: z.string().regex(/^[a-z]{2}(-[a-z0-9]+)?$/i).optional(),
+        locale: LOCALE,
         limit: z.number().int().min(1).max(100).optional().describe("Default 25"),
         feeds: z.array(z.enum(["developer_changelog", "developer_updates", "announcements", "release_notes", "whats_new"])).optional().describe("Restrict to specific feeds"),
       },
@@ -193,7 +196,7 @@ export function createServer(deps: Deps = {}): { server: McpServer; http: HttpCl
         "then returns a consolidated verdict (current/future/beta/eap/deprecated/legacy/retired) with the preferred source and any conflicting sources.",
       inputSchema: {
         feature: z.string().min(2).max(200).describe("Feature, API, or product name"),
-        locale: z.string().regex(/^[a-z]{2}(-[a-z0-9]+)?$/i).optional(),
+        locale: LOCALE,
       },
       annotations: READ_ONLY,
     },
@@ -223,9 +226,10 @@ function dedupe(s: Source[]): Source[] {
   const seen = new Set<string>();
   return s.filter((x) => { if (!x || seen.has(x.url)) return false; seen.add(x.url); return true; });
 }
+function headingNote(d: DocResult): string[] {
+  return d.heading_not_found ? [`Heading "${d.heading_not_found}" not found; returning the full text. Pick one from headings.`] : [];
+}
 function orUndefined<T>(arr: T[]): T[] | undefined { return arr.length ? arr : undefined; }
-
-const RANK: Record<DocResult["authority"], number> = { canonical: 3, changelog: 2, announcement: 1, status: 0 };
 
 /** Pick the most relevant, most authoritative, most recent statement about the feature. */
 export function consolidate(feature: string, docs: DocResult[]) {
@@ -237,7 +241,7 @@ export function consolidate(feature: string, docs: DocResult[]) {
   pool.sort((a, b) => {
     if (term(a.d) !== term(b.d)) return term(a.d) ? -1 : 1;                 // explicit deprecation notices win
     if (Math.abs(a.rel - b.rel) > 0.5) return b.rel - a.rel;                   // then relevance
-    return RANK[b.d.authority] - RANK[a.d.authority] || (b.d.updated_at ?? "").localeCompare(a.d.updated_at ?? "");
+    return AUTHORITY_RANK[b.d.authority] - AUTHORITY_RANK[a.d.authority] || (b.d.updated_at ?? "").localeCompare(a.d.updated_at ?? "");
   });
   const best = pool[0].d;
   const statuses = [...new Set(pool.map((x) => x.d.lifecycle.status))];

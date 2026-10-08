@@ -56,9 +56,9 @@ codex mcp add zendesk-knowledge -- npx -y github:nightious/zendesk-knowledge-mcp
 | Tool | Purpose |
 | --- | --- |
 | `search_help_center(query, locale?, product?, page?, per_page?)` | Search Help Center articles. Paginated. |
-| `get_help_article(article_id_or_url, locale?)` | Full article with plan requirements and dates. |
+| `get_help_article(article_id_or_url, locale?, heading?)` | Full article with headings, plan requirements and dates. `heading` returns one section. |
 | `search_developer_docs(query, max_results?, section?, fetch_pages?)` | Find developer.zendesk.com pages. |
-| `get_developer_page(url)` | Full developer page. |
+| `get_developer_page(url, heading?)` | Full developer page with headings. `heading` or a URL `#anchor` returns one section. |
 | `get_zendesk_changes(query?, since?, locale?, limit?, feeds?)` | Changelog, announcements, and release notes merged. |
 | `get_zendesk_status(subdomain?)` | Active incidents and upcoming maintenance. |
 | `get_feature_lifecycle(feature, locale?)` | Is a feature current, beta, EAP, deprecated, or retired. |
@@ -74,7 +74,7 @@ All optional. See `.env.example`.
 | `ZD_USER_AGENT` | `zendesk-knowledge-mcp/1.0 (+https://github.com/nightious/zendesk-knowledge-mcp)` |
 | `ZD_DEFAULT_LOCALE` | `en-us` |
 | `ZD_HTTP_TIMEOUT_MS` | `15000` |
-| `ZD_HTTP_MAX_RETRIES` | `3` |
+| `ZD_HTTP_MAX_RETRIES` | `2` |
 | `ZD_RATE_{SUPPORT,DEVELOPER,STATUS}_PER_MIN` | `60` / `60` / `10` (status max 10) |
 | `ZD_CACHE_TTL_{SEARCH,PAGE,STATUS,SITEMAP}_S` | `300` / `900` / `60` / `3600` |
 | `ZD_CACHE_MAX_ENTRIES` | `500` (in-memory) |

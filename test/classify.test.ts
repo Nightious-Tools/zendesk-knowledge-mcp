@@ -11,6 +11,8 @@ describe("dates", () => {
     expect(parseDate("6 August 2026")).toBe("2026-08-06");
     expect(parseDate("2026-01-12")).toBe("2026-01-12");
     expect(parseDate("no date here")).toBeUndefined();
+    expect(parseDate("Feb 31, 2026")).toBeUndefined();
+    expect(parseDate("2026-13-05")).toBeUndefined();
   });
   it("reads announcement tables rendered as markdown", () => {
     const d = extractAnnouncementDates("| Announced on | Rollout starts | Rollout ends |\n| --- | --- | --- |\n| July 1, 2024 | July 31, 2024 | January 12, 2026 |\n\nBody");

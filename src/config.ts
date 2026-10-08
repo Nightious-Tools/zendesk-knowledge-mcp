@@ -34,7 +34,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     userAgent: env.ZD_USER_AGENT ?? "zendesk-knowledge-mcp/1.0 (+https://github.com/nightious/zendesk-knowledge-mcp)",
     defaultLocale: (env.ZD_DEFAULT_LOCALE ?? "en-us").toLowerCase(),
     timeoutMs: int("ZD_HTTP_TIMEOUT_MS", 15000),
-    maxRetries: int("ZD_HTTP_MAX_RETRIES", 3),
+    maxRetries: int("ZD_HTTP_MAX_RETRIES", 2),
     ratePerMin: {
       [OFFICIAL_HOSTS.support]: int("ZD_RATE_SUPPORT_PER_MIN", 60),
       [OFFICIAL_HOSTS.developer]: int("ZD_RATE_DEVELOPER_PER_MIN", 60),

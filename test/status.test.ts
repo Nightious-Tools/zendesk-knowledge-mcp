@@ -48,6 +48,7 @@ describe("StatusSource", () => {
     const r = await src.getStatus("nope");
     expect(r.overall).toBe("operational");
     expect(r.notes[0]).toMatch(/did not recognise subdomain "nope"/);
+    expect(r.notes.join(" ")).not.toMatch(/No subdomain given/);
   });
   it("rejects malformed subdomains before any request", async () => {
     const f = mockFetch({});

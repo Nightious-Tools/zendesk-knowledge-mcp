@@ -1,6 +1,6 @@
 {
   "name": "zendesk-knowledge-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Read-only MCP server that answers Zendesk questions from live official Zendesk sources (support.zendesk.com, developer.zendesk.com, status.zendesk.com).",
   "type": "module",
   "license": "SEE LICENSE IN LICENSE",

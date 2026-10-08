@@ -125,6 +125,24 @@ export function truncate(text: string, max: number): { text: string; truncated: 
   return { text: (at > max * 0.6 ? cut.slice(0, at + 1) : cut) + "\n\n[...truncated; fetch the canonical URL for the full text]", truncated: true };
 }
 
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+/** First section whose markdown heading contains `want` (case-insensitive) or slugifies to it, up to the next same-or-higher heading. Ignores ``` fenced lines. */
+export function sliceSection(text: string, want: string): string | undefined {
+  const lines = text.split("\n");
+  const w = want.trim().toLowerCase(), s = slug(want);
+  if (!w) return undefined;
+  let fenced = false, start = -1, level = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*(?:- )?```/.test(lines[i])) { fenced = !fenced; continue; }
+    const m = fenced ? null : /^(#{1,6}) (.+)$/.exec(lines[i]);
+    if (!m) continue;
+    if (start >= 0) { if (m[1].length <= level) return lines.slice(start, i).join("\n").trim(); }
+    else if (m[2].toLowerCase().includes(w) || (s !== "" && slug(m[2]) === s)) { start = i; level = m[1].length; }
+  }
+  return start >= 0 ? lines.slice(start).join("\n").trim() : undefined;
+}
+
 /** Build a short snippet around the best keyword match. */
 export function snippetAround(text: string, query: string, len = 400): string {
   const terms = query.toLowerCase().split(/\W+/).filter((t) => t.length > 2);

@@ -4,6 +4,7 @@ import type { HttpClient } from "../util/http.js";
 import { parseDate, classifyLifecycle, scoreText } from "../util/classify.js";
 import { htmlToText } from "../util/html.js";
 import { isOfficialUrl } from "../util/http.js";
+import { ZdError } from "../util/errors.js";
 import type { DocResult, Source } from "../types.js";
 import type { HelpCenterSource } from "./helpCenter.js";
 
@@ -29,15 +30,10 @@ export class ChangesSource {
   constructor(private http: HttpClient, private cfg: Config, private hc: HelpCenterSource) {}
   private ttl(kind: keyof Config["cacheTtlS"]) { return this.cfg.cacheTtlS[kind] * 1000; }
 
-  /** Parse the official developer changelog table (Date | Event | Subject | Description). */
-  async developerChangelog(): Promise<{ entries: ChangelogEntry[]; retrievedAt: string; cached: boolean }> {
-    const r = await this.http.get(DEV_CHANGELOG_URL, { ttlMs: this.ttl("search") });
-    return { entries: parseChangelogHtml(r.body), retrievedAt: r.retrievedAt, cached: r.cached };
-  }
-
   async getChanges(opts: { query?: string; since?: string; locale?: string; limit?: number; feeds?: ChangeItem["feed"][] }): Promise<{ items: ChangeItem[]; notes: string[]; sources: Source[] }> {
     const locale = (opts.locale ?? this.cfg.defaultLocale).toLowerCase();
-    const since = opts.since ? parseDate(opts.since) ?? opts.since.slice(0, 10) : undefined;
+    const since = opts.since ? parseDate(opts.since) : undefined;
+    if (opts.since && !since) throw new ZdError(`Could not parse since date "${opts.since}"; use yyyy-mm-dd.`, "BAD_INPUT");
     const limit = Math.min(Math.max(opts.limit ?? 25, 1), 100);
     const query = opts.query?.trim() ?? "";
     const feeds = new Set(opts.feeds ?? ["developer_changelog", "developer_updates", "announcements", "release_notes", "whats_new"]);
@@ -48,7 +44,8 @@ export class ChangesSource {
     // 1) developer.zendesk.com changelog ---------------------------------
     if (feeds.has("developer_changelog")) {
       try {
-        const { entries, retrievedAt, cached } = await this.developerChangelog();
+        const { body, retrievedAt, cached } = await this.http.get(DEV_CHANGELOG_URL, { ttlMs: this.ttl("search") });
+        const entries = parseChangelogHtml(body);
         sources.push({ kind: "developer_changelog", url: DEV_CHANGELOG_URL, title: "Zendesk developer changelog", retrieved_at: retrievedAt, from_cache: cached });
         for (const e of entries) {
           if (since && e.date < since) continue;
@@ -80,37 +77,29 @@ export class ChangesSource {
     }
 
     // 2) support.zendesk.com "Zendesk updates" category ----------------------
-    const scopes = await this.hc.resolveUpdateScopes(locale);
-    const hcFeeds: [ChangeItem["feed"], number | undefined][] = [
-      ["announcements", scopes.sections.announcements],
-      ["developer_updates", scopes.sections.developerUpdates],
-      ["release_notes", scopes.sections.releaseNotes],
-      ["whats_new", scopes.sections.whatsNew],
-    ];
+    const scopes = await this.hc.resolveUpdateScopes();
     if (query) {
       // one search across the whole updates category, filtered client-side by section
       try {
-        const wanted = new Set(hcFeeds.filter(([f]) => feeds.has(f)).map(([, id]) => id));
         for (let page = 1; page <= 3; page++) {
           const res = await this.hc.search({ query, locale, categoryId: scopes.categoryId, createdAfter: since, sortBy: "created_at", perPage: 30, page });
           for (const r of res.results) {
-            const feed = feedFromKind(r.source.kind);
+            const feed = FEED_BY_KIND[r.source.kind];
             if (!feed || !feeds.has(feed)) continue;
             items.push(toChangeItem(r, feed));
           }
-          if (res.results.length) sources.push(res.results[0].source && { kind: "help_center", url: `https://${OFFICIAL_HOSTS.support}/hc/${locale}/categories/${scopes.categoryId}`, title: "Zendesk updates (search)", retrieved_at: res.results[0].source.retrieved_at, from_cache: res.results[0].source.from_cache });
+          if (res.results.length) sources.push({ kind: "help_center", url: `https://${OFFICIAL_HOSTS.support}/hc/${locale}/categories/${scopes.categoryId}`, title: "Zendesk updates (search)", retrieved_at: res.results[0].source.retrieved_at, from_cache: res.results[0].source.from_cache });
           if (!res.pagination.next_page || items.length >= limit * 2) break;
         }
-        void wanted;
       } catch (e) { notes.push(`Help Center updates search failed: ${(e as Error).message}`); }
     } else {
       // no query: list newest articles per section
-      for (const [feed, sectionId] of hcFeeds) {
-        if (!feeds.has(feed) || !sectionId) continue;
+      for (const [feed, sectionId] of Object.entries(scopes.sections) as [keyof typeof KIND_BY_FEED, number][]) {
+        if (!feeds.has(feed)) continue;
         try {
           for (let page = 1; page <= 3; page++) {
-            const { articles, retrievedAt, cached, nextPage } = await this.hc.listArticles({ sectionId }, locale, 30, page);
-            sources.push({ kind: feed === "announcements" ? "announcement" : feed === "release_notes" ? "release_notes" : feed === "whats_new" ? "whats_new" : "developer_update", url: `https://${OFFICIAL_HOSTS.support}/hc/${locale}/sections/${sectionId}`, title: `Zendesk ${feed.replace("_", " ")} section`, retrieved_at: retrievedAt, from_cache: cached });
+            const { articles, retrievedAt, cached, nextPage } = await this.hc.listArticles(sectionId, locale, 30, page);
+            sources.push({ kind: KIND_BY_FEED[feed], url: `https://${OFFICIAL_HOSTS.support}/hc/${locale}/sections/${sectionId}`, title: `Zendesk ${feed.replace("_", " ")} section`, retrieved_at: retrievedAt, from_cache: cached });
             let stop = !nextPage;
             for (const a of articles) {
               if (since && a.created_at.slice(0, 10) < since) { stop = true; continue; }
@@ -128,7 +117,7 @@ export class ChangesSource {
       .sort((a, b) => b.date.localeCompare(a.date));
     if (!merged.length) notes.push(since ? `No changes found since ${since}${query ? ` matching "${query}"` : ""}.` : "No changes found.");
     notes.push("Ordering: developer changelog and release notes are authoritative for *what changed*; canonical product docs remain authoritative for *current behaviour*. Verify effective dates on the cited page.");
-    return { items: merged.slice(0, limit), notes, sources: dedupeSources(sources) };
+    return { items: merged.slice(0, limit), notes, sources };
   }
 }
 
@@ -183,23 +172,11 @@ function extractEffective(desc: string): string | undefined {
   return m ? parseDate(m[1]) : undefined;
 }
 
-function feedFromKind(kind: Source["kind"]): ChangeItem["feed"] | undefined {
-  switch (kind) {
-    case "announcement": return "announcements";
-    case "developer_update": return "developer_updates";
-    case "release_notes": return "release_notes";
-    case "whats_new": return "whats_new";
-    default: return undefined;
-  }
-}
+const KIND_BY_FEED = { announcements: "announcement", developer_updates: "developer_update", release_notes: "release_notes", whats_new: "whats_new" } as const;
+const FEED_BY_KIND: Partial<Record<Source["kind"], ChangeItem["feed"]>> = { announcement: "announcements", developer_update: "developer_updates", release_notes: "release_notes", whats_new: "whats_new" };
 
 function toChangeItem(r: DocResult, feed: ChangeItem["feed"]): ChangeItem {
   const t = r.title.toLowerCase();
   const change_type = /breaking/.test(t) ? "breaking_change" : /deprecat/.test(t) ? "deprecated" : /retir|remov|end of life|sunset/.test(t) ? "removed" : /eap|early access/.test(t) ? "eap" : /beta/.test(t) ? "beta" : feed === "release_notes" ? "release_notes" : /announc|introduc|launch|new /.test(t) ? "new" : "announcement";
   return { ...r, change_type, date: (r.created_at ?? r.updated_at ?? "").slice(0, 10), feed };
-}
-
-function dedupeSources(s: Source[]): Source[] {
-  const seen = new Set<string>();
-  return s.filter((x) => { if (!x || seen.has(x.url)) return false; seen.add(x.url); return true; });
 }
