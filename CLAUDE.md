@@ -22,6 +22,14 @@ Claude Code: `.claude-plugin/`. Codex: `.agents/plugins/marketplace.json`, `.cod
 
 Codex doesn't expand `${CLAUDE_PLUGIN_ROOT}`, so `.mcp.json` uses a relative path + `"cwd": "."`. Claude Code also loads `.mcp.json`; the inline server in `.claude-plugin/plugin.json` has the same name (`zendesk-knowledge`) so it overrides it.
 
+## Skill
+
+`skills/zendesk-knowledge/SKILL.md` was picked by `claude plugin eval` over 10 questions phrased as goals, not Zendesk nouns (2026-10-07, v1.0.2). Haiku scored 0.98 with it, 0.91 with the v1.0.1 skill, 0.76 with no skill. What mattered:
+
+- The description line "Load this before the first zendesk-knowledge tool call" decides whether Haiku/Sonnet load the skill at all (Haiku 30/30 vs 10/30). Body wording barely moved scores. Keep it.
+- Keep the description quoted. An unquoted `: ` breaks the YAML and the skill silently never loads.
+- Test questions must name features no skill example names, or the eval measures memorisation.
+
 ## Lockstep
 
 | Change | Also update |

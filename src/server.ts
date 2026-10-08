@@ -12,7 +12,7 @@ import { StatusSource } from "./sources/status.js";
 import type { DocResult, Source, ToolEnvelope, ToolFailure } from "./types.js";
 
 export const SERVER_NAME = "zendesk-knowledge";
-export const SERVER_VERSION = "1.0.1";
+export const SERVER_VERSION = "1.0.2";
 
 const LOCALE = z.string().regex(/^[a-z]{2}(-[a-z0-9]+)?$/i).optional();
 const HEADING = z.string().min(1).max(200).optional().describe("Return only the first section whose heading contains this text (case-insensitive), up to the next same-or-higher heading");
