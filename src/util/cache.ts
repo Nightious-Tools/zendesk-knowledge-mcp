@@ -27,14 +27,5 @@ export class TtlCache<V = unknown> {
     }
   }
 
-  async getOrLoad(key: string, ttlMs: number, loader: () => Promise<V>): Promise<{ value: V; cached: boolean }> {
-    const hit = this.get(key);
-    if (hit !== undefined) return { value: hit, cached: true };
-    const value = await loader();
-    this.set(key, value, ttlMs);
-    return { value, cached: false };
-  }
-
-  clear(): void { this.map.clear(); }
-  get size(): number { return this.map.size; }
+  delete(key: string): void { this.map.delete(key); }
 }

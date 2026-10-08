@@ -3,7 +3,7 @@ import type { Conflict, DocResult, Lifecycle, LifecycleInfo } from "../types.js"
 /* ---------------------------------------------------------------- dates */
 
 const MONTHS = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
-const DATE_RE = new RegExp(`\\b(?:(${MONTHS})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(\\d{4})|(\\d{1,2})\\s+(${MONTHS})\\.?\\s+(\\d{4})|(\\d{4})-(\\d{2})-(\\d{2}))\\b`, "i");
+const DATE_RE = new RegExp(`\\b(?:(${MONTHS})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(\\d{4})|(\\d{1,2})\\s+(${MONTHS})\\.?\\s+(\\d{4})|(\\d{4})-(\\d{2})-(\\d{2}))(?!\\d)`, "i");
 
 /** Parse a human date ("Aug 6, 2026", "6 August 2026", "2026-08-06") to ISO yyyy-mm-dd. */
 export function parseDate(s: string | undefined | null): string | undefined {
@@ -16,7 +16,7 @@ export function parseDate(s: string | undefined | null): string | undefined {
   else { y = +m[6]; mo = monthIndex(m[5]); d = +m[4]; }
   if (!mo || d < 1 || d > 31) return undefined;
   const dt = new Date(Date.UTC(y, mo - 1, d));
-  return isNaN(dt.getTime()) ? undefined : dt.toISOString().slice(0, 10);
+  return isNaN(dt.getTime()) || dt.getUTCDate() !== d || dt.getUTCMonth() !== mo - 1 ? undefined : dt.toISOString().slice(0, 10);
 }
 
 function monthIndex(name: string): number {
@@ -192,7 +192,7 @@ export function detectProducts(title: string, labels: string[] = [], breadcrumbs
 
 /* ------------------------------------------------------------ conflicts */
 
-const AUTHORITY_RANK: Record<DocResult["authority"], number> = { canonical: 3, changelog: 2, announcement: 1, status: 0 };
+export const AUTHORITY_RANK: Record<DocResult["authority"], number> = { canonical: 3, changelog: 2, announcement: 1, status: 0 };
 
 /**
  * Detect documents about the same topic that disagree on lifecycle status,
@@ -232,7 +232,7 @@ export function detectConflicts(results: DocResult[]): Conflict[] {
   return conflicts;
 }
 
-const STOP = new Set(["the", "a", "an", "of", "for", "to", "in", "and", "or", "with", "your", "how", "using", "about", "zendesk", "api", "using", "new", "on", "is", "are", "what", "whats", "what's", "announcing", "announced", "announces", "announcement", "introducing", "update", "updates", "changes", "change", "reference"]);
+const STOP = new Set(["the", "a", "an", "of", "for", "to", "in", "and", "or", "with", "your", "how", "using", "about", "zendesk", "api", "new", "on", "is", "are", "what", "whats", "what's", "announcing", "announced", "announces", "announcement", "introducing", "update", "updates", "changes", "change", "reference"]);
 export function topicKey(title: string): string {
   const toks = title.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((t) => t.length > 2 && !STOP.has(t) && !/^\d+$/.test(t));
   return toks.slice(0, 4).sort().join(" ");

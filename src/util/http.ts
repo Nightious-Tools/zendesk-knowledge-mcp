@@ -1,16 +1,14 @@
 import { OFFICIAL_HOSTS, type Config } from "../config.js";
 import { TtlCache } from "./cache.js";
 import { RateLimiter } from "./rateLimiter.js";
-import { DomainNotAllowedError, HttpError, TimeoutError } from "./errors.js";
+import { DomainNotAllowedError, HttpError, TimeoutError, ZdError } from "./errors.js";
 import { Logger } from "./log.js";
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 export interface FetchResult {
   url: string;          // final URL after redirects
-  status: number;
   body: string;
-  contentType: string;
   cached: boolean;
   retrievedAt: string;  // ISO timestamp of the live fetch that produced this body
 }
@@ -65,7 +63,7 @@ export class HttpClient {
     const p = this.fetchWithRetry(url, opts.accept).finally(() => this.inflight.delete(key));
     this.inflight.set(key, p);
     const res = await p;
-    if (opts.ttlMs > 0 && res.status === 200) this.cache.set(key, res, opts.ttlMs);
+    if (opts.ttlMs > 0) this.cache.set(key, res, opts.ttlMs);
     return res;
   }
 
@@ -74,15 +72,15 @@ export class HttpClient {
     try {
       return { data: JSON.parse(r.body) as T, meta: r };
     } catch {
-      throw new HttpError(r.status, `${url} (invalid JSON body)`);
+      this.cache.delete(`application/json|${url}`); // don't keep serving a bad 200 (e.g. HTML challenge page)
+      throw new ZdError(`Non-JSON response from ${url}`, "BAD_RESPONSE");
     }
   }
-
-  clearCache(): void { this.cache.clear(); }
 
   private async fetchWithRetry(url: string, accept?: string): Promise<FetchResult> {
     let attempt = 0;
     let lastErr: unknown;
+    const start = Date.now();
     while (attempt <= this.cfg.maxRetries) {
       try {
         return await this.fetchOnce(url, accept);
@@ -92,10 +90,10 @@ export class HttpClient {
           e instanceof TimeoutError ||
           (e instanceof HttpError && RETRYABLE.has(e.status)) ||
           (!(e instanceof HttpError) && !(e instanceof DomainNotAllowedError));
-        if (!retryable || attempt === this.cfg.maxRetries) break;
         const base = Math.min(8000, 400 * 2 ** attempt);
         const jitter = Math.floor(Math.random() * 250);
-        const wait = e instanceof HttpError && e.retryAfterMs ? Math.min(30_000, e.retryAfterMs) : base + jitter;
+        const wait = e instanceof HttpError && e.retryAfterMs ? Math.min(10_000, e.retryAfterMs) : base + jitter;
+        if (!retryable || attempt === this.cfg.maxRetries || Date.now() - start + wait > 30_000) break; // stop retrying after ~30 s
         this.log.debug("retrying", { url, attempt, wait, reason: String(e) });
         await this.sleep(wait);
         attempt++;
@@ -110,9 +108,9 @@ export class HttpClient {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), this.cfg.timeoutMs);
     const started = new Date().toISOString();
-    let res: Response;
+    // Timer covers headers AND body: a server stalling mid-body must still time out.
     try {
-      res = await this.fetchImpl(url, {
+      const res = await this.fetchImpl(url, {
         method: "GET",
         redirect: "manual",
         signal: ac.signal,
@@ -122,35 +120,26 @@ export class HttpClient {
           "Accept-Language": "en",
         },
       });
+      if (res.status >= 300 && res.status < 400) {
+        const loc = res.headers.get("location");
+        if (!loc || hops >= 5) throw new HttpError(res.status, url);
+        const next = new URL(loc, url).toString();
+        assertOfficial(next); // redirect must also land on an official host
+        return this.fetchOnce(next, accept, hops + 1);
+      }
+      if (res.status !== 200) {
+        const ra = res.headers.get("retry-after");
+        const retryAfterMs = ra ? (Number.isFinite(Number(ra)) ? Number(ra) * 1000 : Math.max(0, Date.parse(ra) - Date.now())) : undefined;
+        let snippet: string | undefined;
+        try { snippet = (await res.text()).replace(/\s+/g, " ").slice(0, 200) || undefined; } catch { /* ignore */ }
+        throw new HttpError(res.status, url, retryAfterMs, res.status < 500 ? snippet : undefined);
+      }
+      return { url, body: await res.text(), cached: false, retrievedAt: started };
     } catch (e) {
       if ((e as Error)?.name === "AbortError") throw new TimeoutError(url, this.cfg.timeoutMs);
       throw e;
     } finally {
       clearTimeout(timer);
     }
-
-    if (res.status >= 300 && res.status < 400) {
-      const loc = res.headers.get("location");
-      if (!loc || hops >= 5) throw new HttpError(res.status, url);
-      const next = new URL(loc, url).toString();
-      assertOfficial(next); // redirect must also land on an official host
-      return this.fetchOnce(next, accept, hops + 1);
-    }
-    if (res.status !== 200) {
-      const ra = res.headers.get("retry-after");
-      const retryAfterMs = ra ? (Number.isFinite(Number(ra)) ? Number(ra) * 1000 : Math.max(0, Date.parse(ra) - Date.now())) : undefined;
-      let snippet: string | undefined;
-      try { snippet = (await res.text()).replace(/\s+/g, " ").slice(0, 200) || undefined; } catch { /* ignore */ }
-      throw new HttpError(res.status, url, retryAfterMs, res.status < 500 ? snippet : undefined);
-    }
-    const body = await res.text();
-    return {
-      url,
-      status: res.status,
-      body,
-      contentType: res.headers.get("content-type") ?? "",
-      cached: false,
-      retrievedAt: started,
-    };
   }
 }

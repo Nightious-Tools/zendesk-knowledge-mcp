@@ -49,6 +49,8 @@ export interface DocResult {
   lifecycle: LifecycleInfo;
   locale?: string;
   breadcrumbs?: string[];
+  headings?: string[];          // full page/article (get_* tools only)
+  heading_not_found?: string;   // requested `heading` that matched nothing
   labels?: string[];
   authority: "canonical" | "changelog" | "announcement" | "status";
   source: Source;

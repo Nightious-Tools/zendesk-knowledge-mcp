@@ -51882,7 +51882,7 @@ function loadConfig(env = process.env) {
     userAgent: env.ZD_USER_AGENT ?? "zendesk-knowledge-mcp/1.0 (+https://github.com/nightious/zendesk-knowledge-mcp)",
     defaultLocale: (env.ZD_DEFAULT_LOCALE ?? "en-us").toLowerCase(),
     timeoutMs: int2("ZD_HTTP_TIMEOUT_MS", 15e3),
-    maxRetries: int2("ZD_HTTP_MAX_RETRIES", 3),
+    maxRetries: int2("ZD_HTTP_MAX_RETRIES", 2),
     ratePerMin: {
       [OFFICIAL_HOSTS.support]: int2("ZD_RATE_SUPPORT_PER_MIN", 60),
       [OFFICIAL_HOSTS.developer]: int2("ZD_RATE_DEVELOPER_PER_MIN", 60),
@@ -51929,18 +51929,8 @@ var TtlCache = class {
       this.map.delete(oldest);
     }
   }
-  async getOrLoad(key, ttlMs, loader) {
-    const hit = this.get(key);
-    if (hit !== void 0) return { value: hit, cached: true };
-    const value = await loader();
-    this.set(key, value, ttlMs);
-    return { value, cached: false };
-  }
-  clear() {
-    this.map.clear();
-  }
-  get size() {
-    return this.map.size;
+  delete(key) {
+    this.map.delete(key);
   }
 };
 
@@ -52063,7 +52053,7 @@ var HttpClient = class {
     const p = this.fetchWithRetry(url, opts.accept).finally(() => this.inflight.delete(key));
     this.inflight.set(key, p);
     const res = await p;
-    if (opts.ttlMs > 0 && res.status === 200) this.cache.set(key, res, opts.ttlMs);
+    if (opts.ttlMs > 0) this.cache.set(key, res, opts.ttlMs);
     return res;
   }
   async getJson(url, ttlMs) {
@@ -52071,25 +52061,24 @@ var HttpClient = class {
     try {
       return { data: JSON.parse(r.body), meta: r };
     } catch {
-      throw new HttpError(r.status, `${url} (invalid JSON body)`);
+      this.cache.delete(`application/json|${url}`);
+      throw new ZdError(`Non-JSON response from ${url}`, "BAD_RESPONSE");
     }
-  }
-  clearCache() {
-    this.cache.clear();
   }
   async fetchWithRetry(url, accept) {
     let attempt = 0;
     let lastErr;
+    const start = Date.now();
     while (attempt <= this.cfg.maxRetries) {
       try {
         return await this.fetchOnce(url, accept);
       } catch (e) {
         lastErr = e;
         const retryable = e instanceof TimeoutError || e instanceof HttpError && RETRYABLE.has(e.status) || !(e instanceof HttpError) && !(e instanceof DomainNotAllowedError);
-        if (!retryable || attempt === this.cfg.maxRetries) break;
         const base = Math.min(8e3, 400 * 2 ** attempt);
         const jitter = Math.floor(Math.random() * 250);
-        const wait = e instanceof HttpError && e.retryAfterMs ? Math.min(3e4, e.retryAfterMs) : base + jitter;
+        const wait = e instanceof HttpError && e.retryAfterMs ? Math.min(1e4, e.retryAfterMs) : base + jitter;
+        if (!retryable || attempt === this.cfg.maxRetries || Date.now() - start + wait > 3e4) break;
         this.log.debug("retrying", { url, attempt, wait, reason: String(e) });
         await this.sleep(wait);
         attempt++;
@@ -52103,9 +52092,8 @@ var HttpClient = class {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), this.cfg.timeoutMs);
     const started = (/* @__PURE__ */ new Date()).toISOString();
-    let res;
     try {
-      res = await this.fetchImpl(url, {
+      const res = await this.fetchImpl(url, {
         method: "GET",
         redirect: "manual",
         signal: ac.signal,
@@ -52115,44 +52103,36 @@ var HttpClient = class {
           "Accept-Language": "en"
         }
       });
+      if (res.status >= 300 && res.status < 400) {
+        const loc = res.headers.get("location");
+        if (!loc || hops >= 5) throw new HttpError(res.status, url);
+        const next2 = new URL(loc, url).toString();
+        assertOfficial(next2);
+        return this.fetchOnce(next2, accept, hops + 1);
+      }
+      if (res.status !== 200) {
+        const ra = res.headers.get("retry-after");
+        const retryAfterMs = ra ? Number.isFinite(Number(ra)) ? Number(ra) * 1e3 : Math.max(0, Date.parse(ra) - Date.now()) : void 0;
+        let snippet;
+        try {
+          snippet = (await res.text()).replace(/\s+/g, " ").slice(0, 200) || void 0;
+        } catch {
+        }
+        throw new HttpError(res.status, url, retryAfterMs, res.status < 500 ? snippet : void 0);
+      }
+      return { url, body: await res.text(), cached: false, retrievedAt: started };
     } catch (e) {
       if (e?.name === "AbortError") throw new TimeoutError(url, this.cfg.timeoutMs);
       throw e;
     } finally {
       clearTimeout(timer);
     }
-    if (res.status >= 300 && res.status < 400) {
-      const loc = res.headers.get("location");
-      if (!loc || hops >= 5) throw new HttpError(res.status, url);
-      const next2 = new URL(loc, url).toString();
-      assertOfficial(next2);
-      return this.fetchOnce(next2, accept, hops + 1);
-    }
-    if (res.status !== 200) {
-      const ra = res.headers.get("retry-after");
-      const retryAfterMs = ra ? Number.isFinite(Number(ra)) ? Number(ra) * 1e3 : Math.max(0, Date.parse(ra) - Date.now()) : void 0;
-      let snippet;
-      try {
-        snippet = (await res.text()).replace(/\s+/g, " ").slice(0, 200) || void 0;
-      } catch {
-      }
-      throw new HttpError(res.status, url, retryAfterMs, res.status < 500 ? snippet : void 0);
-    }
-    const body = await res.text();
-    return {
-      url,
-      status: res.status,
-      body,
-      contentType: res.headers.get("content-type") ?? "",
-      cached: false,
-      retrievedAt: started
-    };
   }
 };
 
 // src/util/classify.ts
 var MONTHS = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
-var DATE_RE = new RegExp(`\\b(?:(${MONTHS})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(\\d{4})|(\\d{1,2})\\s+(${MONTHS})\\.?\\s+(\\d{4})|(\\d{4})-(\\d{2})-(\\d{2}))\\b`, "i");
+var DATE_RE = new RegExp(`\\b(?:(${MONTHS})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(\\d{4})|(\\d{1,2})\\s+(${MONTHS})\\.?\\s+(\\d{4})|(\\d{4})-(\\d{2})-(\\d{2}))(?!\\d)`, "i");
 function parseDate(s) {
   if (!s) return void 0;
   const m = DATE_RE.exec(s);
@@ -52173,7 +52153,7 @@ function parseDate(s) {
   }
   if (!mo || d < 1 || d > 31) return void 0;
   const dt = new Date(Date.UTC(y, mo - 1, d));
-  return isNaN(dt.getTime()) ? void 0 : dt.toISOString().slice(0, 10);
+  return isNaN(dt.getTime()) || dt.getUTCDate() !== d || dt.getUTCMonth() !== mo - 1 ? void 0 : dt.toISOString().slice(0, 10);
 }
 function monthIndex(name) {
   const n = name.toLowerCase().slice(0, 3);
@@ -52346,7 +52326,7 @@ function detectConflicts(results) {
   }
   return conflicts;
 }
-var STOP = /* @__PURE__ */ new Set(["the", "a", "an", "of", "for", "to", "in", "and", "or", "with", "your", "how", "using", "about", "zendesk", "api", "using", "new", "on", "is", "are", "what", "whats", "what's", "announcing", "announced", "announces", "announcement", "introducing", "update", "updates", "changes", "change", "reference"]);
+var STOP = /* @__PURE__ */ new Set(["the", "a", "an", "of", "for", "to", "in", "and", "or", "with", "your", "how", "using", "about", "zendesk", "api", "new", "on", "is", "are", "what", "whats", "what's", "announcing", "announced", "announces", "announcement", "introducing", "update", "updates", "changes", "change", "reference"]);
 function topicKey(title) {
   const toks = title.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((t) => t.length > 2 && !STOP.has(t) && !/^\d+$/.test(t));
   return toks.slice(0, 4).sort().join(" ");
@@ -66978,6 +66958,28 @@ function truncate(text3, max) {
   const at = Math.max(cut.lastIndexOf("\n\n"), cut.lastIndexOf(". "));
   return { text: (at > max * 0.6 ? cut.slice(0, at + 1) : cut) + "\n\n[...truncated; fetch the canonical URL for the full text]", truncated: true };
 }
+var slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+function sliceSection(text3, want) {
+  const lines = text3.split("\n");
+  const w = want.trim().toLowerCase(), s = slug(want);
+  if (!w) return void 0;
+  let fenced = false, start = -1, level = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*(?:- )?```/.test(lines[i])) {
+      fenced = !fenced;
+      continue;
+    }
+    const m = fenced ? null : /^(#{1,6}) (.+)$/.exec(lines[i]);
+    if (!m) continue;
+    if (start >= 0) {
+      if (m[1].length <= level) return lines.slice(start, i).join("\n").trim();
+    } else if (m[2].toLowerCase().includes(w) || s !== "" && slug(m[2]) === s) {
+      start = i;
+      level = m[1].length;
+    }
+  }
+  return start >= 0 ? lines.slice(start).join("\n").trim() : void 0;
+}
 function snippetAround(text3, query, len = 400) {
   const terms = query.toLowerCase().split(/\W+/).filter((t) => t.length > 2);
   const lower = text3.toLowerCase();
@@ -67018,27 +67020,24 @@ var HelpCenterSource = class {
     const page = Math.max(opts.page ?? 1, 1);
     const q = new URLSearchParams({ query: opts.query.trim(), locale, per_page: String(perPage), page: String(page) });
     if (opts.categoryId) q.set("category", String(opts.categoryId));
-    if (opts.sectionId) q.set("section", String(opts.sectionId));
     if (opts.createdAfter) q.set("created_after", opts.createdAfter);
-    if (opts.updatedAfter) q.set("updated_after", opts.updatedAfter);
     if (opts.sortBy) {
       q.set("sort_by", opts.sortBy);
       q.set("sort_order", "desc");
     }
     const url = `${BASE}/api/v2/help_center/articles/search.json?${q}`;
     const { data: data2, meta } = await this.http.getJson(url, this.ttl("search"));
-    await this.ensureTaxonomy(locale);
+    await this.ensureTaxonomy();
     const notes = [];
-    let hits = (data2.results ?? []).filter((a) => !a.draft);
     const product = opts.product?.trim().toLowerCase();
-    let results = hits.map((a) => this.toResult(a, opts.query, meta.retrievedAt, meta.cached, { snippet: true }));
+    let results = (data2.results ?? []).filter((a) => !a.draft).map((a) => this.toResult(a, opts.query, meta.retrievedAt, meta.cached, { snippet: true }));
     if (product) {
       const matches = (r) => (r.product ?? []).some((p) => p.toLowerCase().includes(product)) || r.title.toLowerCase().includes(product) || (r.labels ?? []).some((l) => l.toLowerCase().includes(product));
       const matched = results.filter(matches);
       if (matched.length) results = [...matched, ...results.filter((r) => !matches(r))];
       else notes.push(`No results on this page were tagged with product "${opts.product}"; showing unfiltered results.`);
     }
-    results.sort((a, b) => (product ? 0 : scoreText(opts.query, b.title, b.content) - scoreText(opts.query, a.title, a.content)) || 0);
+    if (!product) results.sort((a, b) => scoreText(opts.query, b.title, b.content) - scoreText(opts.query, a.title, a.content));
     if (data2.count === 0) notes.push("The Zendesk Help Center search returned no articles for this query. Try fewer/other keywords or a different locale.");
     return {
       results,
@@ -67047,7 +67046,7 @@ var HelpCenterSource = class {
     };
   }
   /** Fetch one article by numeric id or any support.zendesk.com article URL. */
-  async getArticle(idOrUrl, locale) {
+  async getArticle(idOrUrl, locale, heading) {
     const { id, locale: urlLocale } = parseArticleRef(idOrUrl);
     const loc = (locale ?? urlLocale ?? this.cfg.defaultLocale).toLowerCase();
     const url = `${BASE}/api/v2/help_center/${encodeURIComponent(loc)}/articles/${id}.json`;
@@ -67061,19 +67060,18 @@ var HelpCenterSource = class {
       if (st === 401 || st === 403) throw new ZdError(`Article ${id} is restricted by Zendesk (requires a signed-in user segment); it cannot be read anonymously. Cite ${BASE}/hc/${loc}/articles/${id} and ask the user to open it while signed in.`, "RESTRICTED", { id, locale: loc, status: st });
       throw e;
     }
-    await this.ensureTaxonomy(loc);
-    return this.toResult(data2.article, "", meta.retrievedAt, meta.cached, { snippet: false });
+    await this.ensureTaxonomy();
+    return this.toResult(data2.article, "", meta.retrievedAt, meta.cached, { snippet: false, heading, headings: true });
   }
-  /** List articles in a section/category (used for change feeds without a query). */
-  async listArticles(scope, locale, perPage = 30, page = 1) {
-    const path = scope.sectionId ? `sections/${scope.sectionId}` : `categories/${scope.categoryId}`;
-    const url = `${BASE}/api/v2/help_center/${encodeURIComponent(locale)}/${path}/articles.json?sort_by=created_at&sort_order=desc&per_page=${perPage}&page=${page}`;
+  /** List articles in a section (used for change feeds without a query). */
+  async listArticles(sectionId, locale, perPage = 30, page = 1) {
+    const url = `${BASE}/api/v2/help_center/${encodeURIComponent(locale)}/sections/${sectionId}/articles.json?sort_by=created_at&sort_order=desc&per_page=${perPage}&page=${page}`;
     const { data: data2, meta } = await this.http.getJson(url, this.ttl("search"));
     return { articles: data2.articles ?? [], retrievedAt: meta.retrievedAt, cached: meta.cached, nextPage: !!data2.next_page };
   }
   /** Resolve the live ids of the "Zendesk updates" category and its sections by name, falling back to known ids. */
-  async resolveUpdateScopes(locale) {
-    await this.ensureTaxonomy(locale);
+  async resolveUpdateScopes() {
+    await this.ensureTaxonomy();
     const byName = (re, m) => [...m.values()].find((x) => re.test(x.name))?.id;
     const categoryId = byName(/^zendesk updates$/i, this.categoryCache) ?? KNOWN_UPDATE_IDS.updatesCategory;
     const sec = (re, fb) => {
@@ -67084,9 +67082,9 @@ var HelpCenterSource = class {
       categoryId,
       sections: {
         announcements: sec(/^announcements$/i, KNOWN_UPDATE_IDS.announcements),
-        developerUpdates: sec(/^developer updates$/i, KNOWN_UPDATE_IDS.developerUpdates),
-        releaseNotes: sec(/^release notes$/i, KNOWN_UPDATE_IDS.releaseNotes),
-        whatsNew: sec(/what'?s new/i, KNOWN_UPDATE_IDS.whatsNew)
+        developer_updates: sec(/^developer updates$/i, KNOWN_UPDATE_IDS.developerUpdates),
+        release_notes: sec(/^release notes$/i, KNOWN_UPDATE_IDS.releaseNotes),
+        whats_new: sec(/what'?s new/i, KNOWN_UPDATE_IDS.whatsNew)
       }
     };
   }
@@ -67098,19 +67096,20 @@ var HelpCenterSource = class {
     return [c?.name, s.name].filter(Boolean);
   }
   /** Load sections & categories once per TTL window (they're small and change rarely). */
-  async ensureTaxonomy(locale) {
+  // ponytail: always en-us, so breadcrumbs (and sourceKind's name matching) are English for every locale; per-locale caches if localized breadcrumbs matter.
+  async ensureTaxonomy() {
     if (Date.now() - this.taxonomyLoaded < this.ttl("sitemap")) return;
     try {
       for (let page = 1; page <= 10; page++) {
         const { data: data2 } = await this.http.getJson(
-          `${BASE}/api/v2/help_center/${encodeURIComponent(locale)}/sections.json?per_page=100&page=${page}`,
+          `${BASE}/api/v2/help_center/en-us/sections.json?per_page=100&page=${page}`,
           this.ttl("sitemap")
         );
         for (const s of data2.sections ?? []) this.sectionCache.set(s.id, s);
         if (!data2.next_page) break;
       }
       const { data: cats } = await this.http.getJson(
-        `${BASE}/api/v2/help_center/${encodeURIComponent(locale)}/categories.json?per_page=100`,
+        `${BASE}/api/v2/help_center/en-us/categories.json?per_page=100`,
         this.ttl("sitemap")
       );
       for (const c of cats.categories ?? []) this.categoryCache.set(c.id, c);
@@ -67123,8 +67122,9 @@ var HelpCenterSource = class {
     const breadcrumbs = this.breadcrumbsFor(a.section_id);
     const cleaned = htmlToText(a.body ?? "", a.html_url);
     const full = cleaned.text;
-    const body = o.snippet ? a.snippet ? stripEm(a.snippet) : snippetAround(full, query) : truncate(full, this.cfg.maxContentChars);
-    const kind = sourceKind(breadcrumbs);
+    const section = o.heading ? sliceSection(full, o.heading) : void 0;
+    const body = o.snippet ? a.snippet ? stripEm(a.snippet) : snippetAround(full, query) : truncate(section ?? full, this.cfg.maxContentChars);
+    const kind = sourceKind(breadcrumbs, a.section_id);
     const lifecycle = classifyLifecycle({ title: a.title, text: full || (a.snippet ?? ""), labels: a.label_names, breadcrumbs, compilation: kind === "release_notes" || kind === "whats_new" });
     const source = { kind, url: a.html_url, title: a.title, retrieved_at: retrievedAt, from_cache: cached2 };
     return {
@@ -67141,13 +67141,22 @@ var HelpCenterSource = class {
       lifecycle,
       locale: a.locale,
       breadcrumbs,
+      headings: o.headings ? cleaned.headings : void 0,
+      heading_not_found: o.heading && !section ? o.heading : void 0,
       labels: a.label_names,
       authority: kind === "help_center" ? "canonical" : kind === "release_notes" || kind === "whats_new" ? "changelog" : "announcement",
       source
     };
   }
 };
-function sourceKind(breadcrumbs) {
+var KIND_BY_SECTION = {
+  [KNOWN_UPDATE_IDS.announcements]: "announcement",
+  [KNOWN_UPDATE_IDS.developerUpdates]: "developer_update",
+  [KNOWN_UPDATE_IDS.releaseNotes]: "release_notes",
+  [KNOWN_UPDATE_IDS.whatsNew]: "whats_new"
+};
+function sourceKind(breadcrumbs, sectionId) {
+  if (!breadcrumbs.length) return KIND_BY_SECTION[sectionId ?? 0] ?? "help_center";
   const s = breadcrumbs.join(" > ").toLowerCase();
   if (/developer updates/.test(s)) return "developer_update";
   if (/release notes/.test(s)) return "release_notes";
@@ -67188,11 +67197,11 @@ var DeveloperDocsSource = class {
   }
   async loadIndex() {
     if (this.index && Date.now() - this.index.loadedAt < this.ttl("sitemap")) return this.index.entries;
-    const idx = await this.http.get(SITEMAP_INDEX, { ttlMs: this.ttl("sitemap"), accept: "text/xml,application/xml" });
+    const idx = await this.http.get(SITEMAP_INDEX, { ttlMs: 0, accept: "text/xml,application/xml" });
     const sitemaps = [...idx.body.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)].map((m) => m[1]).filter((u) => u.startsWith(BASE2));
     const urls = /* @__PURE__ */ new Set();
     for (const sm of sitemaps.slice(0, 10)) {
-      const r = await this.http.get(sm, { ttlMs: this.ttl("sitemap"), accept: "text/xml,application/xml" });
+      const r = await this.http.get(sm, { ttlMs: 0, accept: "text/xml,application/xml" });
       for (const m of r.body.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)) if (m[1].startsWith(BASE2)) urls.add(m[1]);
     }
     if (!sitemaps.length) {
@@ -67202,7 +67211,7 @@ var DeveloperDocsSource = class {
       const path = new URL(url).pathname;
       return { url, path, tokens: tokenize(path) };
     });
-    this.index = { entries, loadedAt: Date.now(), retrievedAt: idx.retrievedAt };
+    if (entries.length) this.index = { entries, loadedAt: Date.now(), retrievedAt: idx.retrievedAt };
     return entries;
   }
   /** Rank sitemap entries, then fetch the top N for title/snippet/lifecycle. */
@@ -67236,7 +67245,9 @@ var DeveloperDocsSource = class {
   /** Fetch and clean a developer.zendesk.com page. */
   async getPage(url, o = {}) {
     const u = new URL(url);
+    u.protocol = "https:";
     if (u.hostname.toLowerCase() !== OFFICIAL_HOSTS.developer) throw new ZdError(`Only ${OFFICIAL_HOSTS.developer} URLs are accepted (got ${u.hostname})`, "DOMAIN_NOT_ALLOWED");
+    const want = o.heading ?? (u.hash.slice(1) || void 0);
     u.hash = "";
     u.search = "";
     const canonical = u.toString().endsWith("/") ? u.toString() : u.toString() + "/";
@@ -67250,7 +67261,8 @@ var DeveloperDocsSource = class {
     const breadcrumbs = u.pathname.split("/").filter(Boolean).slice(0, -1).map(humanize);
     const lastMod = $2("meta[property='article:modified_time']").attr("content") || $2("time[datetime]").first().attr("datetime") || void 0;
     const lifecycle = classifyLifecycle({ title, text: cleaned.text, labels: badges, breadcrumbs });
-    const body = o.snippetFor ? { text: snippetAround(cleaned.text, o.snippetFor, 500), truncated: true } : truncate(cleaned.text, this.cfg.maxContentChars);
+    const section = want ? sliceSection(cleaned.text, want) : void 0;
+    const body = o.snippetFor ? { text: snippetAround(cleaned.text, o.snippetFor, 500), truncated: true } : truncate(section ?? cleaned.text, this.cfg.maxContentChars);
     const source = { kind: "developer_docs", url: canonical, title, retrieved_at: r.retrievedAt, from_cache: r.cached };
     return {
       title,
@@ -67263,6 +67275,8 @@ var DeveloperDocsSource = class {
       plan_requirements: cleaned.plan_requirements,
       lifecycle,
       breadcrumbs,
+      headings: o.snippetFor ? void 0 : cleaned.headings,
+      heading_not_found: want && !section ? want : void 0,
       labels: badges.length ? [...new Set(badges)] : void 0,
       authority: "canonical",
       source
@@ -67304,7 +67318,6 @@ var SYNONYMS = {
   "help": ["help-center"],
   guide: ["help-center"],
   auth: ["oauth", "authentication"],
-  oauth: ["oauth"],
   token: ["tokens"],
   app: ["apps"],
   apps: ["app"],
@@ -67313,7 +67326,6 @@ var SYNONYMS = {
   objects: ["object"],
   incremental: ["incremental-export"],
   export: ["incremental-export", "exports"],
-  search: ["search"],
   rate: ["rate-limits"],
   limit: ["rate-limits", "limits"],
   limits: ["rate-limits"],
@@ -67334,14 +67346,14 @@ function tokenize(s) {
 function rankEntry(q, e) {
   let s = 0;
   const pathStr = e.path;
-  const slug = pathStr.split("/").filter(Boolean).pop() ?? "";
+  const slug2 = pathStr.split("/").filter(Boolean).pop() ?? "";
   for (const t of q) {
     if (e.tokens.includes(t)) s += 2;
     else if (e.tokens.some((k) => k.includes(t) || t.includes(k))) s += 0.5;
-    if (slug.includes(t)) s += 1.5;
+    if (slug2.includes(t)) s += 1.5;
   }
   if (pathStr.startsWith("/api-reference/")) s += 0.3;
-  if (/introduction|index/.test(slug)) s += 0.2;
+  if (/introduction|index/.test(slug2)) s += 0.2;
   return s;
 }
 function humanize(seg) {
@@ -67359,14 +67371,10 @@ var ChangesSource = class {
   ttl(kind) {
     return this.cfg.cacheTtlS[kind] * 1e3;
   }
-  /** Parse the official developer changelog table (Date | Event | Subject | Description). */
-  async developerChangelog() {
-    const r = await this.http.get(DEV_CHANGELOG_URL, { ttlMs: this.ttl("search") });
-    return { entries: parseChangelogHtml(r.body), retrievedAt: r.retrievedAt, cached: r.cached };
-  }
   async getChanges(opts) {
     const locale = (opts.locale ?? this.cfg.defaultLocale).toLowerCase();
-    const since = opts.since ? parseDate(opts.since) ?? opts.since.slice(0, 10) : void 0;
+    const since = opts.since ? parseDate(opts.since) : void 0;
+    if (opts.since && !since) throw new ZdError(`Could not parse since date "${opts.since}"; use yyyy-mm-dd.`, "BAD_INPUT");
     const limit = Math.min(Math.max(opts.limit ?? 25, 1), 100);
     const query = opts.query?.trim() ?? "";
     const feeds = new Set(opts.feeds ?? ["developer_changelog", "developer_updates", "announcements", "release_notes", "whats_new"]);
@@ -67375,7 +67383,8 @@ var ChangesSource = class {
     const items = [];
     if (feeds.has("developer_changelog")) {
       try {
-        const { entries, retrievedAt, cached: cached2 } = await this.developerChangelog();
+        const { body, retrievedAt, cached: cached2 } = await this.http.get(DEV_CHANGELOG_URL, { ttlMs: this.ttl("search") });
+        const entries = parseChangelogHtml(body);
         sources.push({ kind: "developer_changelog", url: DEV_CHANGELOG_URL, title: "Zendesk developer changelog", retrieved_at: retrievedAt, from_cache: cached2 });
         for (const e of entries) {
           if (since && e.date < since) continue;
@@ -67405,36 +67414,29 @@ var ChangesSource = class {
         notes.push(`Developer changelog unavailable: ${e.message}`);
       }
     }
-    const scopes = await this.hc.resolveUpdateScopes(locale);
-    const hcFeeds = [
-      ["announcements", scopes.sections.announcements],
-      ["developer_updates", scopes.sections.developerUpdates],
-      ["release_notes", scopes.sections.releaseNotes],
-      ["whats_new", scopes.sections.whatsNew]
-    ];
+    const scopes = await this.hc.resolveUpdateScopes();
     if (query) {
       try {
-        const wanted = new Set(hcFeeds.filter(([f]) => feeds.has(f)).map(([, id]) => id));
         for (let page = 1; page <= 3; page++) {
           const res = await this.hc.search({ query, locale, categoryId: scopes.categoryId, createdAfter: since, sortBy: "created_at", perPage: 30, page });
           for (const r of res.results) {
-            const feed = feedFromKind(r.source.kind);
+            const feed = FEED_BY_KIND[r.source.kind];
             if (!feed || !feeds.has(feed)) continue;
             items.push(toChangeItem(r, feed));
           }
-          if (res.results.length) sources.push(res.results[0].source && { kind: "help_center", url: `https://${OFFICIAL_HOSTS.support}/hc/${locale}/categories/${scopes.categoryId}`, title: "Zendesk updates (search)", retrieved_at: res.results[0].source.retrieved_at, from_cache: res.results[0].source.from_cache });
+          if (res.results.length) sources.push({ kind: "help_center", url: `https://${OFFICIAL_HOSTS.support}/hc/${locale}/categories/${scopes.categoryId}`, title: "Zendesk updates (search)", retrieved_at: res.results[0].source.retrieved_at, from_cache: res.results[0].source.from_cache });
           if (!res.pagination.next_page || items.length >= limit * 2) break;
         }
       } catch (e) {
         notes.push(`Help Center updates search failed: ${e.message}`);
       }
     } else {
-      for (const [feed, sectionId] of hcFeeds) {
-        if (!feeds.has(feed) || !sectionId) continue;
+      for (const [feed, sectionId] of Object.entries(scopes.sections)) {
+        if (!feeds.has(feed)) continue;
         try {
           for (let page = 1; page <= 3; page++) {
-            const { articles, retrievedAt, cached: cached2, nextPage } = await this.hc.listArticles({ sectionId }, locale, 30, page);
-            sources.push({ kind: feed === "announcements" ? "announcement" : feed === "release_notes" ? "release_notes" : feed === "whats_new" ? "whats_new" : "developer_update", url: `https://${OFFICIAL_HOSTS.support}/hc/${locale}/sections/${sectionId}`, title: `Zendesk ${feed.replace("_", " ")} section`, retrieved_at: retrievedAt, from_cache: cached2 });
+            const { articles, retrievedAt, cached: cached2, nextPage } = await this.hc.listArticles(sectionId, locale, 30, page);
+            sources.push({ kind: KIND_BY_FEED[feed], url: `https://${OFFICIAL_HOSTS.support}/hc/${locale}/sections/${sectionId}`, title: `Zendesk ${feed.replace("_", " ")} section`, retrieved_at: retrievedAt, from_cache: cached2 });
             let stop = !nextPage;
             for (const a of articles) {
               if (since && a.created_at.slice(0, 10) < since) {
@@ -67459,7 +67461,7 @@ var ChangesSource = class {
     }).sort((a, b) => b.date.localeCompare(a.date));
     if (!merged.length) notes.push(since ? `No changes found since ${since}${query ? ` matching "${query}"` : ""}.` : "No changes found.");
     notes.push("Ordering: developer changelog and release notes are authoritative for *what changed*; canonical product docs remain authoritative for *current behaviour*. Verify effective dates on the cited page.");
-    return { items: merged.slice(0, limit), notes, sources: dedupeSources(sources) };
+    return { items: merged.slice(0, limit), notes, sources };
   }
 };
 function parseChangelogHtml(html3) {
@@ -67507,32 +67509,12 @@ function extractEffective(desc) {
   const m = /(?:starting|beginning|as of|effective|on|from)\s+([A-Z][a-z]+\.?\s+\d{1,2},?\s+\d{4})/i.exec(desc);
   return m ? parseDate(m[1]) : void 0;
 }
-function feedFromKind(kind) {
-  switch (kind) {
-    case "announcement":
-      return "announcements";
-    case "developer_update":
-      return "developer_updates";
-    case "release_notes":
-      return "release_notes";
-    case "whats_new":
-      return "whats_new";
-    default:
-      return void 0;
-  }
-}
+var KIND_BY_FEED = { announcements: "announcement", developer_updates: "developer_update", release_notes: "release_notes", whats_new: "whats_new" };
+var FEED_BY_KIND = { announcement: "announcements", developer_update: "developer_updates", release_notes: "release_notes", whats_new: "whats_new" };
 function toChangeItem(r, feed) {
   const t = r.title.toLowerCase();
   const change_type = /breaking/.test(t) ? "breaking_change" : /deprecat/.test(t) ? "deprecated" : /retir|remov|end of life|sunset/.test(t) ? "removed" : /eap|early access/.test(t) ? "eap" : /beta/.test(t) ? "beta" : feed === "release_notes" ? "release_notes" : /announc|introduc|launch|new /.test(t) ? "new" : "announcement";
   return { ...r, change_type, date: (r.created_at ?? r.updated_at ?? "").slice(0, 10), feed };
-}
-function dedupeSources(s) {
-  const seen = /* @__PURE__ */ new Set();
-  return s.filter((x) => {
-    if (!x || seen.has(x.url)) return false;
-    seen.add(x.url);
-    return true;
-  });
 }
 
 // src/sources/status.ts
@@ -67568,8 +67550,8 @@ var StatusSource = class {
     const notes = [
       ...extraNotes,
       "Zendesk's Status API returns only currently active incidents and upcoming maintenance; resolved or historical incidents are not available via API (see status.zendesk.com for history).",
-      sub && qs ? `Filtered to incidents Zendesk associates with subdomain "${sub}". Absence of incidents does not guarantee the account is unaffected by a very new event.` : "No subdomain given: showing all active incidents across Zendesk infrastructure."
-    ];
+      sub ? qs ? `Filtered to incidents Zendesk associates with subdomain "${sub}". Absence of incidents does not guarantee the account is unaffected by a very new event.` : "" : "No subdomain given: showing all active incidents across Zendesk infrastructure."
+    ].filter(Boolean);
     return {
       active: activeViews,
       maintenance: maintViews,
@@ -67622,7 +67604,9 @@ function normalise(res, kind) {
 
 // src/server.ts
 var SERVER_NAME = "zendesk-knowledge";
-var SERVER_VERSION = "1.0.0";
+var SERVER_VERSION = "1.0.1";
+var LOCALE = external_exports.string().regex(/^[a-z]{2}(-[a-z0-9]+)?$/i).optional();
+var HEADING = external_exports.string().min(1).max(200).optional().describe("Return only the first section whose heading contains this text (case-insensitive), up to the next same-or-higher heading");
 var READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
 function createServer(deps = {}) {
   const cfg = deps.cfg ?? loadConfig();
@@ -67670,7 +67654,7 @@ function createServer(deps = {}) {
       description: "Search official Zendesk product documentation on support.zendesk.com via the Help Center Search API (articles only; community posts are excluded). Returns title, snippet, canonical URL, updated date, product, plan requirements and lifecycle status for each hit. Paginated.",
       inputSchema: {
         query: external_exports.string().min(1).max(300).describe("Keywords, e.g. 'trigger conditions' or 'SLA policies'"),
-        locale: external_exports.string().regex(/^[a-z]{2}(-[a-z0-9]+)?$/i).optional().describe("Help Center locale, default en-us"),
+        locale: LOCALE.describe("Help Center locale, default en-us"),
         product: external_exports.string().max(60).optional().describe("Soft filter/boost, e.g. Support, Guide, Messaging, Talk, Explore, Sell, AI agents, Admin Center"),
         page: external_exports.number().int().min(1).max(100).optional().describe("Result page (default 1)"),
         per_page: external_exports.number().int().min(1).max(30).optional().describe("Results per page (default 10, max 30)")
@@ -67686,16 +67670,17 @@ function createServer(deps = {}) {
     "get_help_article",
     {
       title: "Get Zendesk Help Center article",
-      description: "Fetch one official Help Center article by numeric id or support.zendesk.com URL. Returns cleaned full text (truncated if very long), plan banners, breadcrumbs, dates and lifecycle classification.",
+      description: "Fetch one official Help Center article by numeric id or support.zendesk.com URL. Returns cleaned full text (truncated if very long), headings, plan banners, breadcrumbs, dates and lifecycle classification. Pass 'heading' to get one section only.",
       inputSchema: {
         article_id_or_url: external_exports.string().min(1).describe("e.g. 4408893545882 or https://support.zendesk.com/hc/en-us/articles/4408893545882-..."),
-        locale: external_exports.string().regex(/^[a-z]{2}(-[a-z0-9]+)?$/i).optional().describe("Override locale (defaults to the URL's locale or en-us)")
+        locale: LOCALE.describe("Override locale (defaults to the URL's locale or en-us)"),
+        heading: HEADING
       },
       annotations: READ_ONLY
     },
     async (a) => guard("get_help_article", async () => {
-      const doc = await hc.getArticle(a.article_id_or_url, a.locale);
-      const notes = [];
+      const doc = await hc.getArticle(a.article_id_or_url, a.locale, a.heading);
+      const notes = headingNote(doc);
       if (doc.lifecycle.future_change_mentioned) notes.push(`Article references a future-dated change: "${doc.lifecycle.future_change_mentioned}". Distinguish current vs upcoming behaviour when answering.`);
       if (doc.content_truncated) notes.push("Content truncated to ZD_MAX_CONTENT_CHARS; see canonical URL for full text.");
       return ok("get_help_article", doc, [doc.source], notes);
@@ -67723,13 +67708,13 @@ function createServer(deps = {}) {
     "get_developer_page",
     {
       title: "Get Zendesk developer docs page",
-      description: "Fetch and clean one developer.zendesk.com page (API reference, guide, changelog). Returns markdown-ish text, headings, badges (e.g. Deprecated) and lifecycle classification.",
-      inputSchema: { url: external_exports.string().url().describe("Must be on developer.zendesk.com") },
+      description: "Fetch and clean one developer.zendesk.com page (API reference, guide, changelog). Returns markdown-ish text, headings, badges (e.g. Deprecated) and lifecycle classification. Pass 'heading' (or a URL #anchor) to get one section only.",
+      inputSchema: { url: external_exports.string().url().describe("Must be on developer.zendesk.com; a #anchor selects that section"), heading: HEADING },
       annotations: READ_ONLY
     },
     async (a) => guard("get_developer_page", async () => {
-      const doc = await dev.getPage(a.url);
-      const notes = [];
+      const doc = await dev.getPage(a.url, { heading: a.heading });
+      const notes = headingNote(doc);
       if (doc.lifecycle.status !== "current") notes.push(`Page classified as ${doc.lifecycle.status} (${doc.lifecycle.confidence}, scope=${doc.lifecycle.scope}); evidence: ${doc.lifecycle.evidence.slice(0, 3).join("; ")}`);
       if (doc.lifecycle.scope === "partial") notes.push("Lifecycle keywords were found in the body only: likely one endpoint/field/parameter on this page is affected while the rest is current. Quote the specific note when answering.");
       return ok("get_developer_page", doc, [doc.source], notes);
@@ -67743,7 +67728,7 @@ function createServer(deps = {}) {
       inputSchema: {
         query: external_exports.string().max(200).optional().describe("Keywords to filter, e.g. 'offset pagination' or 'OAuth tokens'. Omit for the newest changes."),
         since: external_exports.string().optional().describe("Only changes announced on/after this date (ISO yyyy-mm-dd or 'Aug 1, 2026')"),
-        locale: external_exports.string().regex(/^[a-z]{2}(-[a-z0-9]+)?$/i).optional(),
+        locale: LOCALE,
         limit: external_exports.number().int().min(1).max(100).optional().describe("Default 25"),
         feeds: external_exports.array(external_exports.enum(["developer_changelog", "developer_updates", "announcements", "release_notes", "whats_new"])).optional().describe("Restrict to specific feeds")
       },
@@ -67774,7 +67759,7 @@ function createServer(deps = {}) {
       description: "Composite lookup for questions like 'Is offset pagination deprecated?' or 'Is Copilot GA?'. Searches canonical Help Center docs, developer docs, and the change feeds, then returns a consolidated verdict (current/future/beta/eap/deprecated/legacy/retired) with the preferred source and any conflicting sources.",
       inputSchema: {
         feature: external_exports.string().min(2).max(200).describe("Feature, API, or product name"),
-        locale: external_exports.string().regex(/^[a-z]{2}(-[a-z0-9]+)?$/i).optional()
+        locale: LOCALE
       },
       annotations: READ_ONLY
     },
@@ -67807,10 +67792,12 @@ function dedupe(s) {
     return true;
   });
 }
+function headingNote(d) {
+  return d.heading_not_found ? [`Heading "${d.heading_not_found}" not found; returning the full text. Pick one from headings.`] : [];
+}
 function orUndefined(arr) {
   return arr.length ? arr : void 0;
 }
-var RANK = { canonical: 3, changelog: 2, announcement: 1, status: 0 };
 function consolidate(feature, docs) {
   const scored = docs.map((d) => ({ d, rel: scoreText(feature, d.title, d.content) })).filter((x) => x.rel > 0);
   if (!scored.length) return { status: "unknown", confidence: "low", reason: "No official documentation matched this feature name.", preferred_source: null };
@@ -67820,7 +67807,7 @@ function consolidate(feature, docs) {
   pool.sort((a, b) => {
     if (term(a.d) !== term(b.d)) return term(a.d) ? -1 : 1;
     if (Math.abs(a.rel - b.rel) > 0.5) return b.rel - a.rel;
-    return RANK[b.d.authority] - RANK[a.d.authority] || (b.d.updated_at ?? "").localeCompare(a.d.updated_at ?? "");
+    return AUTHORITY_RANK[b.d.authority] - AUTHORITY_RANK[a.d.authority] || (b.d.updated_at ?? "").localeCompare(a.d.updated_at ?? "");
   });
   const best = pool[0].d;
   const statuses = [...new Set(pool.map((x) => x.d.lifecycle.status))];

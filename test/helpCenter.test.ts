@@ -57,15 +57,31 @@ describe("HelpCenterSource", () => {
     expect(d.authority).toBe("announcement");
     expect(d.content).toContain("| Announced on |");
   });
+  it("getArticle returns headings and flags a heading that matches nothing", async () => {
+    const { hc } = mk({ [`${HC}/en-us/articles/4408893545882.json`]: { json: { article: article() } } });
+    const d = await hc.getArticle("4408893545882", undefined, "nope");
+    expect(d.headings).toEqual(["Conditions"]);
+    expect(d.heading_not_found).toBe("nope");
+    expect(d.content).toContain("## Conditions");
+  });
   it("surfaces restricted (401) articles with a helpful error", async () => {
     const { hc } = mk({ [`${HC}/en-us/articles/12345.json`]: { status: 401, body: "{}" } });
     await expect(hc.getArticle("12345")).rejects.toMatchObject({ code: "RESTRICTED" });
   });
   it("resolves update scopes by name with fallbacks", async () => {
     const { hc } = mk({});
-    const s = await hc.resolveUpdateScopes("en-us");
+    const s = await hc.resolveUpdateScopes();
     expect(s.categoryId).toBe(4405298749210);
-    expect(s.sections.developerUpdates).toBe(4405298889242);
-    expect(s.sections.releaseNotes).toBe(4405298847002); // fallback id
+    expect(s.sections.developer_updates).toBe(4405298889242);
+    expect(s.sections.release_notes).toBe(4405298847002); // fallback id
+  });
+  it("a non-English call does not poison the taxonomy for English calls", async () => {
+    const { hc } = mk({
+      [`${HC}/de/sections.json`]: { json: { sections: [{ id: 4405298889242, name: "Entwickler-Updates", category_id: 4405298749210 }], next_page: null } },
+      [`${HC}/de/categories.json`]: { json: { categories: [{ id: 4405298749210, name: "Zendesk-Updates" }] } },
+      [`${HC}/articles/search.json`]: { json: { results: [article({ section_id: 4405298889242 })], count: 1, page: 1, page_count: 1, per_page: 10, next_page: null } },
+    });
+    await hc.search({ query: "x", locale: "de" });
+    expect((await hc.search({ query: "x" })).results[0].source.kind).toBe("developer_update");
   });
 });

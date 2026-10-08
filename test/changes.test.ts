@@ -65,6 +65,11 @@ describe("ChangesSource.getChanges", () => {
     expect(r.items.map((i) => i.title)).toEqual(["Deprecated: OAuth Tokens", "Announcing more granular OAuth client scopes"]);
     expect(f.calls.some((u) => u.includes("search.json?query=oauth") && u.includes("category=4405298749210"))).toBe(true);
   });
+  it("rejects an unparseable since, accepts an ISO timestamp", async () => {
+    const { src } = mk();
+    await expect(src.getChanges({ since: "2026-7-1" })).rejects.toMatchObject({ code: "BAD_INPUT" });
+    expect((await src.getChanges({ since: "2026-07-01T00:00:00Z" })).items).toHaveLength(3);
+  });
   it("restricts feeds", async () => {
     const { src } = mk();
     const r = await src.getChanges({ feeds: ["developer_changelog"] });

@@ -1,7 +1,7 @@
 import * as cheerio from "cheerio";
 import { OFFICIAL_HOSTS, type Config } from "../config.js";
 import type { HttpClient } from "../util/http.js";
-import { htmlToText, snippetAround, truncate } from "../util/html.js";
+import { htmlToText, sliceSection, snippetAround, truncate } from "../util/html.js";
 import { classifyLifecycle, detectProducts } from "../util/classify.js";
 import { ZdError } from "../util/errors.js";
 import type { DocResult, Source } from "../types.js";
@@ -25,11 +25,11 @@ export class DeveloperDocsSource {
 
   async loadIndex(): Promise<IndexEntry[]> {
     if (this.index && Date.now() - this.index.loadedAt < this.ttl("sitemap")) return this.index.entries;
-    const idx = await this.http.get(SITEMAP_INDEX, { ttlMs: this.ttl("sitemap"), accept: "text/xml,application/xml" });
+    const idx = await this.http.get(SITEMAP_INDEX, { ttlMs: 0, accept: "text/xml,application/xml" });
     const sitemaps = [...idx.body.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)].map((m) => m[1]).filter((u) => u.startsWith(BASE));
     const urls = new Set<string>();
     for (const sm of sitemaps.slice(0, 10)) {
-      const r = await this.http.get(sm, { ttlMs: this.ttl("sitemap"), accept: "text/xml,application/xml" });
+      const r = await this.http.get(sm, { ttlMs: 0, accept: "text/xml,application/xml" });
       for (const m of r.body.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)) if (m[1].startsWith(BASE)) urls.add(m[1]);
     }
     if (!sitemaps.length) {
@@ -40,7 +40,7 @@ export class DeveloperDocsSource {
       const path = new URL(url).pathname;
       return { url, path, tokens: tokenize(path) };
     });
-    this.index = { entries, loadedAt: Date.now(), retrievedAt: idx.retrievedAt };
+    if (entries.length) this.index = { entries, loadedAt: Date.now(), retrievedAt: idx.retrievedAt };
     return entries;
   }
 
@@ -75,9 +75,11 @@ export class DeveloperDocsSource {
   }
 
   /** Fetch and clean a developer.zendesk.com page. */
-  async getPage(url: string, o: { snippetFor?: string } = {}): Promise<DocResult> {
+  async getPage(url: string, o: { snippetFor?: string; heading?: string } = {}): Promise<DocResult> {
     const u = new URL(url);
+    u.protocol = "https:";
     if (u.hostname.toLowerCase() !== OFFICIAL_HOSTS.developer) throw new ZdError(`Only ${OFFICIAL_HOSTS.developer} URLs are accepted (got ${u.hostname})`, "DOMAIN_NOT_ALLOWED");
+    const want = o.heading ?? (u.hash.slice(1) || undefined);
     u.hash = ""; u.search = "";
     const canonical = u.toString().endsWith("/") ? u.toString() : u.toString() + "/";
     const r = await this.http.get(canonical, { ttlMs: this.ttl("page") });
@@ -92,7 +94,8 @@ export class DeveloperDocsSource {
     const breadcrumbs = u.pathname.split("/").filter(Boolean).slice(0, -1).map(humanize);
     const lastMod = $("meta[property='article:modified_time']").attr("content") || $("time[datetime]").first().attr("datetime") || undefined;
     const lifecycle = classifyLifecycle({ title, text: cleaned.text, labels: badges, breadcrumbs });
-    const body = o.snippetFor ? { text: snippetAround(cleaned.text, o.snippetFor, 500), truncated: true } : truncate(cleaned.text, this.cfg.maxContentChars);
+    const section = want ? sliceSection(cleaned.text, want) : undefined;
+    const body = o.snippetFor ? { text: snippetAround(cleaned.text, o.snippetFor, 500), truncated: true } : truncate(section ?? cleaned.text, this.cfg.maxContentChars);
     const source: Source = { kind: "developer_docs", url: canonical, title, retrieved_at: r.retrievedAt, from_cache: r.cached };
     return {
       title,
@@ -105,6 +108,8 @@ export class DeveloperDocsSource {
       plan_requirements: cleaned.plan_requirements,
       lifecycle,
       breadcrumbs,
+      headings: o.snippetFor ? undefined : cleaned.headings,
+      heading_not_found: want && !section ? want : undefined,
       labels: badges.length ? [...new Set(badges)] : undefined,
       authority: "canonical",
       source,
@@ -131,9 +136,9 @@ const SYNONYMS: Record<string, string[]> = {
   webhook: ["webhooks"], webhooks: ["webhook"], trigger: ["triggers"], triggers: ["trigger"],
   automation: ["automations"], macro: ["macros"], view: ["views"], article: ["articles"], articles: ["article"],
   hc: ["help-center", "help_center"], "help": ["help-center"], guide: ["help-center"],
-  auth: ["oauth", "authentication"], oauth: ["oauth"], token: ["tokens"], app: ["apps"], apps: ["app"],
+  auth: ["oauth", "authentication"], token: ["tokens"], app: ["apps"], apps: ["app"],
   "custom": ["custom-objects", "custom-data"], object: ["objects", "custom-objects"], objects: ["object"],
-  incremental: ["incremental-export"], export: ["incremental-export", "exports"], search: ["search"],
+  incremental: ["incremental-export"], export: ["incremental-export", "exports"],
   rate: ["rate-limits"], limit: ["rate-limits", "limits"], limits: ["rate-limits"],
   sunshine: ["sunshine-conversations", "conversations"], sunco: ["sunshine-conversations"], messaging: ["messaging", "conversations"],
   zaf: ["apps", "apps-framework"], sdk: ["sdks", "sdk"], "side": ["side_conversations"], conversation: ["conversations", "side_conversations"],

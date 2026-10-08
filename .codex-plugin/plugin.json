@@ -1,6 +1,6 @@
 {
   "name": "zendesk-knowledge-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Answer Zendesk questions from live official Zendesk docs, API reference, changelogs, and status. Read-only.",
   "author": { "name": "nightious", "url": "https://github.com/nightious" },
   "homepage": "https://github.com/nightious/zendesk-knowledge-mcp",

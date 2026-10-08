@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { htmlToText, truncate, snippetAround } from "../src/util/html.js";
+import { htmlToText, truncate, snippetAround, sliceSection } from "../src/util/html.js";
 import { article } from "./helpers.js";
 
 describe("htmlToText", () => {
@@ -31,6 +31,21 @@ describe("htmlToText", () => {
   it("renders tables as markdown and drops scripts/nav", () => {
     const o = htmlToText(`<nav>menu</nav><script>x()</script><table><thead><tr><th>Date</th><th>Event</th></tr></thead><tbody><tr><td>Aug 26, 2026</td><td>Deprecated</td></tr></tbody></table>`);
     expect(o.text).toBe("| Date | Event |\n| --- | --- |\n| Aug 26, 2026 | Deprecated |");
+  });
+});
+
+describe("sliceSection", () => {
+  it("ignores '# comment' lines inside code fences", () => {
+    const sec = ["## Setup", "", "```", "# install", "npm i", "```", "", "more setup"];
+    const t = [...sec, "", "## Next", "", "other"].join("\n");
+    expect(sliceSection(t, "install")).toBeUndefined();
+    expect(sliceSection(t, "setup")).toBe(sec.join("\n"));
+  });
+  it("handles fences in list items, non-Latin and blank requests", () => {
+    const t = ["## Setup", "- ```", "# install", "```", "## Next", "x"].join("\n");
+    expect(sliceSection(t, "next")).toBe("## Next\nx");
+    expect(sliceSection("## 概要\na\n## 設定\nb", "手順")).toBeUndefined();
+    expect(sliceSection(t, "  ")).toBeUndefined();
   });
 });
 

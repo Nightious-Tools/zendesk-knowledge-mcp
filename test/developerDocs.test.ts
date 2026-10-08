@@ -51,6 +51,26 @@ describe("DeveloperDocsSource", () => {
     expect(d.content).toContain("## List Tokens");
     expect(d.breadcrumbs).toEqual(["Api Reference", "Ticketing", "Oauth"]);
   });
+  it("getPage slices the #anchor section and returns headings", async () => {
+    const { dev } = mk();
+    const d = await dev.getPage(`${D}/api-reference/ticketing/oauth/oauth_tokens/#list-tokens`);
+    expect(d.content).toBe("## List Tokens\n\nGET /api/v2/oauth/tokens");
+    expect(d.headings).toEqual(["OAuth Tokens", "List Tokens"]);
+    expect(d.heading_not_found).toBeUndefined();
+    expect(d.lifecycle.status).toBe("retired"); // still classified on the full page
+  });
+  it("upgrades http:// developer URLs instead of rejecting them", async () => {
+    const { dev } = mk();
+    expect((await dev.getPage("http://developer.zendesk.com/api-reference/ticketing/oauth/oauth_tokens/")).url).toBe(`${D}/api-reference/ticketing/oauth/oauth_tokens/`);
+  });
+  it("does not cache an empty sitemap index", async () => {
+    const f = mockFetch({ [`${D}/sitemap-index.xml`]: { body: "<sitemapindex></sitemapindex>" } });
+    const cfg = testConfig();
+    const dev = new DeveloperDocsSource(new HttpClient(cfg, new Logger("silent"), f, async () => {}), cfg);
+    await dev.loadIndex();
+    await dev.loadIndex();
+    expect(f.calls.length).toBe(2);
+  });
   it("refuses non-developer hosts", async () => {
     const { dev } = mk();
     await expect(dev.getPage("https://support.zendesk.com/hc/en-us/articles/1")).rejects.toMatchObject({ code: "DOMAIN_NOT_ALLOWED" });

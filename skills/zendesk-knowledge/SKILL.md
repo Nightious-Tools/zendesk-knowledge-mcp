@@ -17,7 +17,7 @@ Seven read-only tools. Every response has `citations`, `notes`, and per-result `
 | Is X current / beta / EAP / deprecated / retired? | `get_feature_lifecycle` |
 | Outage or maintenance right now | `get_zendesk_status` (`subdomain` for the account) |
 
-Always open the best hit before stating specifics — search results are snippets.
+Always open the best hit before stating specifics — search results are snippets. Both `get_*` tools return `headings`; pass `heading` to fetch one section of a long page.
 
 ## Searching the Help Center (tested)
 
@@ -33,7 +33,7 @@ Always open the best hit before stating specifics — search results are snippet
 
 - Ranking is by URL slug, so use **resource names**: `ticket audits`, `webhooks`, `custom objects records`, `sla policies`, `user fields`, `job status`.
 - **Disambiguate shared names with the product area**, because Chat, Ticketing and Custom Data each have e.g. triggers/search/rate limits: "business rules triggers", "chat api triggers", "ticketing search", "custom objects limits". `section:"api-reference"` alone does not disambiguate.
-- **Actions aren't in slugs.** "merge tickets", "bulk update", "create ticket" all resolve to the Tickets page — open it with `get_developer_page` and find the endpoint in the headings.
+- **Actions aren't in slugs.** "merge tickets", "bulk update", "create ticket" all resolve to the Tickets page — open it with `get_developer_page` and find the endpoint in `headings`, then re-call with `heading` (or a URL `#anchor`) to get just that section.
 - Concept questions ("authenticate with API token") land in `/documentation/authentication/…`; use `section:"documentation"` for guides.
 - `other_candidate_urls` lists runners-up; `fetch_pages:false` is a fast preview.
 

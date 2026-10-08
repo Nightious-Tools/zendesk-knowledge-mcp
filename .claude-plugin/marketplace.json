@@ -7,7 +7,7 @@
       "name": "zendesk-knowledge-mcp",
       "source": "./",
       "description": "MCP server with 7 read-only tools over support.zendesk.com, developer.zendesk.com, and status.zendesk.com, plus a skill that teaches agents how to search them.",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": { "name": "nightious" },
       "homepage": "https://github.com/nightious/zendesk-knowledge-mcp",
       "repository": "https://github.com/nightious/zendesk-knowledge-mcp",
