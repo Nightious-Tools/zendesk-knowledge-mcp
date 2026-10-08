@@ -67604,7 +67604,7 @@ function normalise(res, kind) {
 
 // src/server.ts
 var SERVER_NAME = "zendesk-knowledge";
-var SERVER_VERSION = "1.0.1";
+var SERVER_VERSION = "1.0.2";
 var LOCALE = external_exports.string().regex(/^[a-z]{2}(-[a-z0-9]+)?$/i).optional();
 var HEADING = external_exports.string().min(1).max(200).optional().describe("Return only the first section whose heading contains this text (case-insensitive), up to the next same-or-higher heading");
 var READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
