@@ -51879,7 +51879,7 @@ var OFFICIAL_HOSTS = {
 function loadConfig(env = process.env) {
   const lvl = env.ZD_LOG_LEVEL ?? "info";
   return {
-    userAgent: env.ZD_USER_AGENT ?? "zendesk-knowledge-mcp/1.0 (+https://github.com/nightious/zendesk-knowledge-mcp)",
+    userAgent: env.ZD_USER_AGENT ?? "zendesk-knowledge-mcp/1.0 (+https://github.com/Nightious-Tools/zendesk-knowledge-mcp)",
     defaultLocale: (env.ZD_DEFAULT_LOCALE ?? "en-us").toLowerCase(),
     timeoutMs: int2("ZD_HTTP_TIMEOUT_MS", 15e3),
     maxRetries: int2("ZD_HTTP_MAX_RETRIES", 2),

@@ -17,14 +17,14 @@ Needs Node.js 20+. No API keys.
 Claude Code (server plus the `zendesk-knowledge` skill):
 
 ```
-/plugin marketplace add nightious/zendesk-knowledge-mcp
+/plugin marketplace add Nightious-Tools/zendesk-knowledge-mcp
 /plugin install zendesk-knowledge-mcp@zendesk-knowledge-mcp
 ```
 
 Codex:
 
 ```
-codex plugin marketplace add nightious/zendesk-knowledge-mcp
+codex plugin marketplace add Nightious-Tools/zendesk-knowledge-mcp
 ```
 
 Then run `/plugins`, install Zendesk Knowledge, and start a new session.
@@ -36,19 +36,19 @@ Other MCP clients:
   "mcpServers": {
     "zendesk-knowledge": {
       "command": "npx",
-      "args": ["-y", "github:nightious/zendesk-knowledge-mcp"]
+      "args": ["-y", "github:Nightious-Tools/zendesk-knowledge-mcp"]
     }
   }
 }
 ```
 
-On Windows, some clients need `"command": "cmd", "args": ["/c", "npx", "-y", "github:nightious/zendesk-knowledge-mcp"]`.
+On Windows, some clients need `"command": "cmd", "args": ["/c", "npx", "-y", "github:Nightious-Tools/zendesk-knowledge-mcp"]`.
 
 Server only:
 
 ```bash
-claude mcp add zendesk-knowledge -s user -- npx -y github:nightious/zendesk-knowledge-mcp
-codex mcp add zendesk-knowledge -- npx -y github:nightious/zendesk-knowledge-mcp
+claude mcp add zendesk-knowledge -s user -- npx -y github:Nightious-Tools/zendesk-knowledge-mcp
+codex mcp add zendesk-knowledge -- npx -y github:Nightious-Tools/zendesk-knowledge-mcp
 ```
 
 ## Tools
@@ -71,7 +71,7 @@ All optional. See `.env.example`.
 
 | Variable | Default |
 | --- | --- |
-| `ZD_USER_AGENT` | `zendesk-knowledge-mcp/1.0 (+https://github.com/nightious/zendesk-knowledge-mcp)` |
+| `ZD_USER_AGENT` | `zendesk-knowledge-mcp/1.0 (+https://github.com/Nightious-Tools/zendesk-knowledge-mcp)` |
 | `ZD_DEFAULT_LOCALE` | `en-us` |
 | `ZD_HTTP_TIMEOUT_MS` | `15000` |
 | `ZD_HTTP_MAX_RETRIES` | `2` |
@@ -84,7 +84,7 @@ All optional. See `.env.example`.
 ## Development
 
 ```bash
-git clone https://github.com/nightious/zendesk-knowledge-mcp && cd zendesk-knowledge-mcp
+git clone https://github.com/Nightious-Tools/zendesk-knowledge-mcp && cd zendesk-knowledge-mcp
 npm install
 npm test
 npm run build    # writes dist/index.mjs, which is committed
