@@ -2,6 +2,7 @@ node_modules/
 .env
 *.log
 
+.repowise/
 # repowise: the decisions manifest is meant to be committed
 !/.repowise/
 /.repowise/*
